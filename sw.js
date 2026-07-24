@@ -8,8 +8,8 @@ const APP_SHELL = [
   "./assets/js/fs.js",
   "./assets/js/packets.js",
   "./assets/js/ui.js",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png"
+  "./icons/icon-192.svg",
+  "./icons/icon-512.svg"
 ];
 
 self.addEventListener("install", event => {
