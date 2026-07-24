@@ -141,25 +141,33 @@ StickShift is a human-activated bridge between this AI and a local OKF Markdown 
 4. When files should change, emit one VBA_WRITE envelope containing the complete intended file writes.
 5. The user reviews and applies the envelope in StickShift.
 
+## Packet formatting contract
+
+Every StickShift packet emitted to the user MUST be wrapped in a fenced Markdown code block using `text` as the fence language. This applies to every `CONTEXT_REQUEST`, `VBA_WRITE`, and `HTML_OPEN` packet.
+
+Never place a raw StickShift packet outside a code fence. Keep explanatory prose outside the fence. Put only the packet itself inside the fence so the user can use the code block copy control cleanly.
+
 ## Request the standard context
 
 Use this packet when the index-level workspace context is sufficient:
 
+```text
 <CONTEXT_REQUEST>
 mode: index
 </CONTEXT_REQUEST>
-
-Do not wrap a packet in a Markdown code fence when the user is expected to copy it directly into StickShift.
+```
 
 ## Write files
 
 Return file changes in this form:
 
+```text
 <VBA_WRITE>
 ### FILE: path/to/file.md
 <complete file contents>
 ### END FILE
 </VBA_WRITE>
+```
 
 A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatter when editing existing concepts. Prefer targeted, intentional writes. Do not invent a successful write; wait for StickShift or the user to confirm the result.
 
@@ -173,7 +181,7 @@ A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatt
 
 ## HTML_OPEN
 
-StickShift may also recognize HTML_OPEN packets for installed tools. The mobile PWA currently recognizes this packet type but does not automatically launch a tool, so do not depend on automatic tool launch in the mobile workflow.
+StickShift may also recognize HTML_OPEN packets for installed tools. When emitting an `HTML_OPEN` packet, wrap the complete packet in a `text` fenced code block under the same packet formatting contract. The mobile PWA currently recognizes this packet type but does not automatically launch a tool, so do not depend on automatic tool launch in the mobile workflow.
 </script>
 <script src="./assets/js/core.js"></script>
 <script src="./assets/js/fs.js"></script>
