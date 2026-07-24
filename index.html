@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<meta content="#062f4d" name="theme-color"/>
+<meta content="dark" name="color-scheme"/>
+<meta content="yes" name="mobile-web-app-capable"/>
+<meta content="yes" name="apple-mobile-web-app-capable"/>
+<meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"/>
+<link href="./manifest.webmanifest" rel="manifest"/>
+<meta content="StickShift" name="application-name"/>
+<title>StickShift</title>
+<link href="./assets/app.css" rel="stylesheet"/>
+</head>
+<body>
+<div class="wrap">
+<header class="mast">
+<div class="brand">Stick<b>Shift</b></div>
+<div class="tag">manual-activation knowledge agent — mobile / HTTPS refactor</div>
+</header>
+<div class="runtime" id="runtimeBanner">
+<span class="lamp"></span>
+<div><strong id="runtimeTitle">Checking runtime…</strong><div id="runtimeDetail"></div></div>
+</div>
+<div class="gate" id="gate">
+<div class="gear"><span class="lbl">GEAR</span><span class="val" id="gearVal">N</span></div>
+<div class="ctx"><span class="k">ENGAGED CONTEXT</span><span class="v none" id="ctxPath">— no context engaged —</span></div>
+<div class="acts">
+<button id="btnCopySkill">Copy AI skill</button>
+<button class="primary" id="btnSwitch">Switch context</button>
+</div>
+</div>
+<div class="meter" id="ctxMeter"> </div>
+<nav aria-label="StickShift views" class="tabs">
+<button class="on" data-view="console">CONSOLE</button>
+<button data-view="explorer">EXPLORER</button>
+<button data-view="diagnostics">DIAGNOSTICS</button>
+</nav>
+<main>
+<section class="panel" id="viewConsole">
+<div aria-label="Read StickShift packet from clipboard" class="paste" id="pastePanel" role="button" tabindex="0">
+<div class="inner">
+<span class="eyebrow" id="pasteStatus">MOBILE PASTE RECEIVER</span>
+<strong class="title" id="pasteTitle">Tap to read clipboard</strong>
+<span class="detail" id="pasteDetail">On HTTPS, one tap reads and routes a CONTEXT_REQUEST, VBA_WRITE, or HTML_OPEN packet. Long-press paste and hardware-keyboard paste still work.</span>
+</div>
+</div>
+<div class="bays">
+<section class="card">
+<h2>◄ Pull — Build context bundle</h2>
+<div class="body">
+<p class="hint">Build the standard index bundle from the engaged OKF folder. The result is written to <code>-dist/StickShift-context.md</code> and copied when clipboard permission allows.</p>
+<div class="row">
+<button class="primary" id="btnBuild">Build index bundle</button>
+<button disabled="" id="btnCopy">Copy again</button>
+</div>
+<div class="meter" id="bundleMeter"></div>
+<textarea class="output" id="bundleOut" placeholder="Generated context bundle appears here." readonly=""></textarea>
+</div>
+</section>
+<section class="card">
+<h2>Push ► — Apply write envelope</h2>
+<div class="body">
+<p class="hint">Tap the receiver above and StickShift reads the clipboard directly. If clipboard read is blocked, a manual paste sheet opens instead.</p>
+<div class="row">
+<button id="btnManualPaste">Open manual paste</button>
+<button id="btnIndex">Regenerate indexes</button>
+</div>
+<div class="meter" id="writeMeter"></div>
+</div>
+</section>
+</div>
+<section class="card telemetry">
+<h2>Telemetry</h2>
+<div class="body" style="padding:0">
+<div class="log" id="log"></div>
+</div>
+</section>
+</section>
+<section class="panel" hidden="" id="viewExplorer">
+<div class="workspace">
+<aside class="file-list" id="fileList"><div class="file-row">Engage a context to browse files.</div></aside>
+<div class="editor">
+<div class="editor-head">
+<span class="editor-path" id="editorPath">No file selected</span>
+<button disabled="" id="btnEdit">Edit</button>
+<button class="primary" hidden="" id="btnSaveFile">Save</button>
+<button id="btnRefreshFiles">Refresh</button>
+</div>
+<div class="editor-body" id="editorBody"><div class="preview">Select a Markdown file.</div></div>
+</div>
+</div>
+</section>
+<section class="panel" hidden="" id="viewDiagnostics">
+<div class="card">
+<h2>Runtime diagnostics</h2>
+<div class="body">
+<p class="hint">This page is intentionally explicit about which browser capabilities are available. The mobile architecture is viable only when folder access remains human-triggered and the page is served from a trustworthy origin.</p>
+<div class="diag-grid" id="diagGrid"></div>
+<div class="row" style="margin-top:14px">
+<button id="btnRefreshDiag">Refresh diagnostics</button>
+<button id="btnReconnect">Reconnect saved context</button>
+</div>
+</div>
+</div>
+</section>
+</main>
+<div class="foot">Nothing runs on its own. Nothing happens until you tap. You stay in the loop.</div>
+</div>
+<div class="modal-backdrop" id="pasteModal">
+<div class="modal">
+<h2>Paste StickShift packet</h2>
+<p>Clipboard read was unavailable or you chose the manual path. Long-press in the box, paste, then tap Route packet.</p>
+<textarea id="manualPacket" placeholder="&lt;CONTEXT_REQUEST&gt;… or &lt;VBA_WRITE&gt;…"></textarea>
+<div class="row" style="justify-content:flex-end;margin-top:12px">
+<button id="btnPasteCancel">Cancel</button>
+<button class="primary" id="btnPasteRoute">Route packet</button>
+</div>
+</div>
+</div>
+<script data-skill-slug="stickshift-operator" id="stickshift-skill" type="text/markdown">
+---
+okf_version: "0.1"
+type: Skill
+title: StickShift Operator
+description: Operate StickShift as a human-controlled local context bridge. Request OKF context with CONTEXT_REQUEST packets and return filesystem changes with VBA_WRITE envelopes.
+tags: [skill, stickshift, okf, context, filesystem]
+---
+
+# StickShift Operator
+
+StickShift is a human-activated bridge between this AI and a local OKF Markdown workspace. The user controls every transfer. The AI does not have direct filesystem access and must never claim a read or write occurred until the user returns the result from StickShift.
+
+## Core loop
+
+1. When workspace context is needed, emit a StickShift context request.
+2. The user copies the request into StickShift.
+3. StickShift returns an OKF context bundle. Treat that returned bundle as the authoritative workspace context for the turn.
+4. When files should change, emit one VBA_WRITE envelope containing the complete intended file writes.
+5. The user reviews and applies the envelope in StickShift.
+
+## Request the standard context
+
+Use this packet when the index-level workspace context is sufficient:
+
+<CONTEXT_REQUEST>
+mode: index
+</CONTEXT_REQUEST>
+
+Do not wrap a packet in a Markdown code fence when the user is expected to copy it directly into StickShift.
+
+## Write files
+
+Return file changes in this form:
+
+<VBA_WRITE>
+### FILE: path/to/file.md
+<complete file contents>
+### END FILE
+</VBA_WRITE>
+
+A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatter when editing existing concepts. Prefer targeted, intentional writes. Do not invent a successful write; wait for StickShift or the user to confirm the result.
+
+## Context discipline
+
+- OKF Markdown in the selected workspace is the state of record.
+- Clipboard content is temporary transport, not memory.
+- Ask StickShift for context instead of assuming stale workspace state.
+- Keep personal, work, and other corpora separate according to the folder the user engages.
+- The human remains the approval boundary for reads, writes, and tool actions.
+
+## HTML_OPEN
+
+StickShift may also recognize HTML_OPEN packets for installed tools. The mobile PWA currently recognizes this packet type but does not automatically launch a tool, so do not depend on automatic tool launch in the mobile workflow.
+</script>
+<script src="./assets/js/core.js"></script>
+<script src="./assets/js/fs.js"></script>
+<script src="./assets/js/packets.js"></script>
+<script src="./assets/js/ui.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
+      .catch(error => console.warn("StickShift service worker registration failed:", error));
+  });
+}
+</script>
+</body>
+</html>
