@@ -8,6 +8,15 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_between(text: str, start_marker: str, end_marker: str, replacement: str, label: str) -> str:
+    try:
+        start = text.index(start_marker)
+        end = text.index(end_marker, start)
+    except ValueError as exc:
+        raise SystemExit(f"{label}: anchor not found") from exc
+    return text[:start] + replacement + text[end:]
+
+
 fs_path = Path("assets/js/fs.js")
 fs = fs_path.read_text(encoding="utf-8")
 
@@ -41,53 +50,6 @@ async function appendFile(path,content,initial=""){
 async function fileExists(path){''',
     "appendFile helper",
 )
-
-old_incremental = '''async function generateIndexForDir(dirPath){
-  const dir=await getDirHandle(dirPath,false);
-  const files=[],subs=[];
-  for await(const [name,h] of dir.entries()){
-    if(name.startsWith(".")||isSystemDir(name)) continue;
-    if(h.kind==="directory") subs.push(name);
-    else if(name.toLowerCase().endsWith(".md")) files.push(name);
-  }
-
-  const concepts=files.filter(isConcept).sort();
-  if(!concepts.length&&!subs.length) return 0;
-
-  let out=dirPath===""?`---\nokf_version: "${OKF_VERSION}"\n---\n\n`:"";
-  const entries=await Promise.all(concepts.map(async name=>{
-    const path=dirPath?dirPath+"/"+name:name;
-    return [name,await readFile(path)];
-  }));
-  for(const [name,content] of entries) out+=entryLine(name,content)+"\n";
-  if(concepts.length) out+="\n";
-  if(subs.length){
-    out+="# Subdirectories\n";
-    for(const s of subs.sort()) out+=`* [${s}](${s}/index.md)\n`;
-    out+="\n";
-  }
-  await writeFile(dirPath?dirPath+"/index.md":"index.md",out);
-  return 1;
-}
-
-async function generateIndexesForPaths(paths){
-  if(!requireRoot()) return 0;
-  const dirs=new Set([""]);
-  for(const raw of paths||[]){
-    const rel=String(raw||"").replace(/\\\\/g,"/").replace(/^\\/+/,"");
-    const parts=rel.split("/").filter(Boolean);
-    parts.pop();
-    let current="";
-    for(const part of parts){
-      if(part.startsWith(".")||isSystemDir(part)) break;
-      current=current?current+"/"+part:part;
-      dirs.add(current);
-    }
-  }
-  const counts=await Promise.all([...dirs].map(generateIndexForDir));
-  return counts.reduce((sum,n)=>sum+n,0);
-}
-'''
 
 new_incremental = '''function indexEntryTarget(line){
   const m=String(line||"").match(/^\\* \\[[^\\]]*\\]\\(([^)]+)\\)(?: - .*)?$/);
@@ -155,54 +117,13 @@ async function updateIndexesForWrites(writes){
   const patched=await Promise.all([...grouped.entries()].map(([dirPath,items])=>patchIndexForWrites(dirPath,items)));
   return {count:patched.filter(Boolean).length,mode:"patch"};
 }
-'''
 
-fs = replace_once(fs, old_incremental, new_incremental, "replace incremental index implementation")
+'''
+fs = replace_between(fs, "async function generateIndexForDir(dirPath){", "function bundleAnchor", new_incremental, "incremental index functions")
 fs_path.write_text(fs, encoding="utf-8")
 
 packets_path = Path("assets/js/packets.js")
 packets = packets_path.read_text(encoding="utf-8")
-
-old_apply = '''async function applyWrite(env){
-  const applyStart=performance.now();
-  const timing={existsMs:0,fileWriteMs:0,logReadMs:0,logWriteMs:0,totalMs:0};
-  let written=0,skipped=0,logLines="";
-  const writtenPaths=[];
-  for(const item of env.files){
-    const rel=String(item.rel||"").replace(/\\\\/g,"/").replace(/^\\/+/,"");
-    const leaf=rel.split("/").pop().toLowerCase();
-    if(!rel||RESERVED.has(leaf)){skipped++;continue;}
-
-    let stageStart=performance.now();
-    const existed=await fileExists(rel);
-    timing.existsMs+=performance.now()-stageStart;
-
-    stageStart=performance.now();
-    await writeFile(rel,item.content);
-    timing.fileWriteMs+=performance.now()-stageStart;
-
-    written++;
-    writtenPaths.push(rel);
-    logLines+=`- ${stampNow()}  ${existed?"edit":"new"}  ${rel}\\n`;
-  }
-  if(logLines){
-    let existing="# Log\\n\\n";
-    let stageStart=performance.now();
-    const logExists=await fileExists("log.md");
-    timing.logReadMs+=performance.now()-stageStart;
-    if(logExists){
-      stageStart=performance.now();
-      existing=await readFile("log.md");
-      timing.logReadMs+=performance.now()-stageStart;
-    }
-    stageStart=performance.now();
-    await writeFile("log.md",existing+logLines);
-    timing.logWriteMs+=performance.now()-stageStart;
-  }
-  timing.totalMs=performance.now()-applyStart;
-  return {written,skipped,timing,paths:writtenPaths};
-}
-'''
 
 new_apply = '''async function applyWrite(env){
   const applyStart=performance.now();
@@ -236,32 +157,19 @@ async function appendWriteAudit(writes){
   await appendFile("log.md",logLines,"# Log\\n\\n");
   return performance.now()-started;
 }
+
 '''
+packets = replace_between(packets, "async function applyWrite(env){", "async function writeClip", new_apply, "primary write functions")
 
-packets = replace_once(packets, old_apply, new_apply, "split primary write and audit")
+new_write_branch = '''  if(text.includes("<VBA_WRITE>")){
+    if(!requireRoot()){setPasteState("error","Context not engaged","Switch context first.");resetPasteSoon();return;}
+    const writeStartedAt=Number.isFinite(timing.startedAt)?timing.startedAt:performance.now();
+    const parseStart=performance.now();
+    const env=parseWriteEnvelope(text);
+    const parseMs=performance.now()-parseStart;
+    if(env.error){setPasteState("error","Write parse error",env.error);log(env.error,"er");resetPasteSoon();return;}
 
-old_route = '''    try{
-      const r=await applyWrite(env);
-      const indexStart=performance.now();
-      const n=await generateIndexesForPaths(r.paths);
-      const indexMs=performance.now()-indexStart;
-
-      $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped`;
-      setPasteState("success",`Applied ${r.written} file${r.written===1?"":"s"}`,`Affected indexes regenerated: ${n}.`);
-      log(`VBA_WRITE applied: ${r.written} written, ${r.skipped} skipped.`,"ok");
-
-      // Explorer owns its own refresh when opened; do not reread the corpus on the Console hot path.
-      const totalMs=performance.now()-writeStartedAt;
-      const readPart=Number.isFinite(timing.clipboardReadMs)?`read ${fmtMs(timing.clipboardReadMs)} · `:"";
-      const wt=r.timing||{};
-      log(`Write timing: ${readPart}parse ${fmtMs(parseMs)} · apply ${fmtMs(wt.totalMs||0)} (exists ${fmtMs(wt.existsMs||0)} · files ${fmtMs(wt.fileWriteMs||0)} · log-read ${fmtMs(wt.logReadMs||0)} · log-write ${fmtMs(wt.logWriteMs||0)}) · indexes ${fmtMs(indexMs)} · refresh deferred · total ${fmtMs(totalMs)}.`,"info");
-      $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped · ${fmtMs(totalMs)} total`;
-    }catch(e){
-      setPasteState("error","Apply failed",e?.message||String(e));log("Apply failed: "+(e?.message||e),"er");
-    }
-    resetPasteSoon();return;'''
-
-new_route = '''    let r;
+    let r;
     try{
       r=await applyWrite(env);
     }catch(e){
@@ -296,9 +204,10 @@ new_route = '''    let r;
       setPasteState("error","File written; maintenance incomplete",e?.message||String(e));
       log(`File write succeeded in ${fmtMs(ackMs)}, but maintenance failed after ${fmtMs(totalMs)}: ${e?.message||e}`,"er");
     }
-    resetPasteSoon();return;'''
-
-packets = replace_once(packets, old_route, new_route, "write acknowledgment route")
+    resetPasteSoon();return;
+  }
+'''
+packets = replace_between(packets, '  if(text.includes("<VBA_WRITE>")){', '  if(text.includes("<CONTEXT_REQUEST>")){', new_write_branch, "write packet branch")
 packets_path.write_text(packets, encoding="utf-8")
 
 index_path = Path("index.html")
