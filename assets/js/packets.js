@@ -22,22 +22,41 @@ function parseWriteEnvelope(text){
   return files.length?{files}:{error:"No valid ### FILE: blocks found."};
 }
 async function applyWrite(env){
+  const applyStart=performance.now();
+  const timing={existsMs:0,fileWriteMs:0,logReadMs:0,logWriteMs:0,totalMs:0};
   let written=0,skipped=0,logLines="";
   for(const item of env.files){
     const rel=String(item.rel||"").replace(/\\/g,"/").replace(/^\/+/,"");
     const leaf=rel.split("/").pop().toLowerCase();
     if(!rel||RESERVED.has(leaf)){skipped++;continue;}
+
+    let stageStart=performance.now();
     const existed=await fileExists(rel);
+    timing.existsMs+=performance.now()-stageStart;
+
+    stageStart=performance.now();
     await writeFile(rel,item.content);
+    timing.fileWriteMs+=performance.now()-stageStart;
+
     written++;
     logLines+=`- ${stampNow()}  ${existed?"edit":"new"}  ${rel}\n`;
   }
   if(logLines){
     let existing="# Log\n\n";
-    if(await fileExists("log.md")) existing=await readFile("log.md");
+    let stageStart=performance.now();
+    const logExists=await fileExists("log.md");
+    timing.logReadMs+=performance.now()-stageStart;
+    if(logExists){
+      stageStart=performance.now();
+      existing=await readFile("log.md");
+      timing.logReadMs+=performance.now()-stageStart;
+    }
+    stageStart=performance.now();
     await writeFile("log.md",existing+logLines);
+    timing.logWriteMs+=performance.now()-stageStart;
   }
-  return {written,skipped};
+  timing.totalMs=performance.now()-applyStart;
+  return {written,skipped,timing};
 }
 
 async function writeClip(text){
@@ -69,7 +88,7 @@ function resetPasteSoon(){
 function openManualPaste(prefill=""){
   $("manualPacket").value=prefill;
   $("pasteModal").classList.add("open");
-  setTimeout(()=>$("manualPacket").focus(),50);
+  setTimeout(()=>$('manualPacket').focus(),50);
 }
 function closeManualPaste(){$("pasteModal").classList.remove("open");}
 function fmtMs(ms){return `${Math.max(0,Math.round(ms))} ms`;}
@@ -134,15 +153,29 @@ async function routePacket(text,timing={}){
   if(!text){setPasteState("error","No packet found","Paste or copy a StickShift packet first.");resetPasteSoon();return;}
   if(text.includes("<VBA_WRITE>")){
     if(!requireRoot()){setPasteState("error","Context not engaged","Switch context first.");resetPasteSoon();return;}
+    const writeStartedAt=Number.isFinite(timing.startedAt)?timing.startedAt:performance.now();
+    const parseStart=performance.now();
     const env=parseWriteEnvelope(text);
+    const parseMs=performance.now()-parseStart;
     if(env.error){setPasteState("error","Write parse error",env.error);log(env.error,"er");resetPasteSoon();return;}
     try{
       const r=await applyWrite(env);
+      const indexStart=performance.now();
       const n=await generateIndexes();
+      const indexMs=performance.now()-indexStart;
+
       $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped`;
       setPasteState("success",`Applied ${r.written} file${r.written===1?"":"s"}`,`Indexes regenerated: ${n}.`);
       log(`VBA_WRITE applied: ${r.written} written, ${r.skipped} skipped.`,"ok");
+
+      const refreshStart=performance.now();
       await refreshFiles();
+      const refreshMs=performance.now()-refreshStart;
+      const totalMs=performance.now()-writeStartedAt;
+      const readPart=Number.isFinite(timing.clipboardReadMs)?`read ${fmtMs(timing.clipboardReadMs)} · `:"";
+      const wt=r.timing||{};
+      log(`Write timing: ${readPart}parse ${fmtMs(parseMs)} · apply ${fmtMs(wt.totalMs||0)} (exists ${fmtMs(wt.existsMs||0)} · files ${fmtMs(wt.fileWriteMs||0)} · log-read ${fmtMs(wt.logReadMs||0)} · log-write ${fmtMs(wt.logWriteMs||0)}) · indexes ${fmtMs(indexMs)} · refresh ${fmtMs(refreshMs)} · total ${fmtMs(totalMs)}.`,"info");
+      $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped · ${fmtMs(totalMs)} total`;
     }catch(e){
       setPasteState("error","Apply failed",e?.message||String(e));log("Apply failed: "+(e?.message||e),"er");
     }
