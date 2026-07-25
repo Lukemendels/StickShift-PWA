@@ -1,4 +1,4 @@
-const CACHE_NAME = "stickshift-pwa-v4";
+const CACHE_NAME = "stickshift-pwa-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -6,7 +6,7 @@ const APP_SHELL = [
   "./assets/app.css",
   "./assets/js/core.js",
   "./assets/js/fs.js",
-  "./assets/js/packets.js",
+  "./assets/js/packets.js?v=5",
   "./assets/js/ui.js",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
