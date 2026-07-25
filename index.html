@@ -147,15 +147,40 @@ Every StickShift packet emitted to the user MUST be wrapped in a fenced Markdown
 
 Never place a raw StickShift packet outside a code fence. Keep explanatory prose outside the fence. Put only the packet itself inside the fence so the user can use the code block copy control cleanly.
 
-## Request the standard context
+## Context retrieval strategy
 
-Use this packet when the index-level workspace context is sufficient:
+Treat the index as a discovery map, not the default payload for every read.
+
+- Use `mode: index` when first entering a workspace, when the map may be stale, or when you do not yet know which concept paths are relevant.
+- Once the current conversation contains a sufficiently recent index and the needed paths are known, use `mode: bundle` with `include:` to retrieve only the concepts needed for the task.
+- Prefer targeted retrieval over repeatedly requesting the full index.
+- Request the index again when workspace structure may have changed materially, when a path cannot be resolved from the current map, or when the user explicitly asks for a fresh map.
+- Do not assume the contents of a mapped concept from its title or description. Retrieve the concept when its details matter.
+
+## Request the workspace index
+
+Use this for discovery:
 
 ```text
 <CONTEXT_REQUEST>
 mode: index
 </CONTEXT_REQUEST>
 ```
+
+## Request targeted context
+
+When the relevant paths are known, request only those concepts:
+
+```text
+<CONTEXT_REQUEST>
+mode: bundle
+include:
+- programs/operation-paperclip.md
+- builds/stickshift.md
+</CONTEXT_REQUEST>
+```
+
+The `include:` entries are exact workspace-relative Markdown paths learned from the index or from context already returned by StickShift. One or many paths may be requested in the same bundle.
 
 ## Write files
 
@@ -176,6 +201,7 @@ A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatt
 - OKF Markdown in the selected workspace is the state of record.
 - Clipboard content is temporary transport, not memory.
 - Ask StickShift for context instead of assuming stale workspace state.
+- Reuse a sufficiently recent index as the map for subsequent targeted pulls; do not fetch it again without a reason.
 - Keep personal, work, and other corpora separate according to the folder the user engages.
 - The human remains the approval boundary for reads, writes, and tool actions.
 
