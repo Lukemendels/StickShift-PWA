@@ -112,8 +112,53 @@ async function generateIndexes(){
     await writeFile(d.dir?d.dir+"/index.md":"index.md",out);
     count++;
   }
-  await refreshFiles();
   return count;
+}
+
+async function generateIndexForDir(dirPath){
+  const dir=await getDirHandle(dirPath,false);
+  const files=[],subs=[];
+  for await(const [name,h] of dir.entries()){
+    if(name.startsWith(".")||isSystemDir(name)) continue;
+    if(h.kind==="directory") subs.push(name);
+    else if(name.toLowerCase().endsWith(".md")) files.push(name);
+  }
+
+  const concepts=files.filter(isConcept).sort();
+  if(!concepts.length&&!subs.length) return 0;
+
+  let out=dirPath===""?`---\nokf_version: "${OKF_VERSION}"\n---\n\n`:"";
+  const entries=await Promise.all(concepts.map(async name=>{
+    const path=dirPath?dirPath+"/"+name:name;
+    return [name,await readFile(path)];
+  }));
+  for(const [name,content] of entries) out+=entryLine(name,content)+"\n";
+  if(concepts.length) out+="\n";
+  if(subs.length){
+    out+="# Subdirectories\n";
+    for(const s of subs.sort()) out+=`* [${s}](${s}/index.md)\n`;
+    out+="\n";
+  }
+  await writeFile(dirPath?dirPath+"/index.md":"index.md",out);
+  return 1;
+}
+
+async function generateIndexesForPaths(paths){
+  if(!requireRoot()) return 0;
+  const dirs=new Set([""]);
+  for(const raw of paths||[]){
+    const rel=String(raw||"").replace(/\\/g,"/").replace(/^\/+/,"");
+    const parts=rel.split("/").filter(Boolean);
+    parts.pop();
+    let current="";
+    for(const part of parts){
+      if(part.startsWith(".")||isSystemDir(part)) break;
+      current=current?current+"/"+part:part;
+      dirs.add(current);
+    }
+  }
+  const counts=await Promise.all([...dirs].map(generateIndexForDir));
+  return counts.reduce((sum,n)=>sum+n,0);
 }
 
 function bundleAnchor(path,content,layer){
