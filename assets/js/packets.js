@@ -25,6 +25,7 @@ async function applyWrite(env){
   const applyStart=performance.now();
   const timing={existsMs:0,fileWriteMs:0,logReadMs:0,logWriteMs:0,totalMs:0};
   let written=0,skipped=0,logLines="";
+  const writtenPaths=[];
   for(const item of env.files){
     const rel=String(item.rel||"").replace(/\\/g,"/").replace(/^\/+/,"");
     const leaf=rel.split("/").pop().toLowerCase();
@@ -39,6 +40,7 @@ async function applyWrite(env){
     timing.fileWriteMs+=performance.now()-stageStart;
 
     written++;
+    writtenPaths.push(rel);
     logLines+=`- ${stampNow()}  ${existed?"edit":"new"}  ${rel}\n`;
   }
   if(logLines){
@@ -56,7 +58,7 @@ async function applyWrite(env){
     timing.logWriteMs+=performance.now()-stageStart;
   }
   timing.totalMs=performance.now()-applyStart;
-  return {written,skipped,timing};
+  return {written,skipped,timing,paths:writtenPaths};
 }
 
 async function writeClip(text){
@@ -161,20 +163,18 @@ async function routePacket(text,timing={}){
     try{
       const r=await applyWrite(env);
       const indexStart=performance.now();
-      const n=await generateIndexes();
+      const n=await generateIndexesForPaths(r.paths);
       const indexMs=performance.now()-indexStart;
 
       $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped`;
-      setPasteState("success",`Applied ${r.written} file${r.written===1?"":"s"}`,`Indexes regenerated: ${n}.`);
+      setPasteState("success",`Applied ${r.written} file${r.written===1?"":"s"}`,`Affected indexes regenerated: ${n}.`);
       log(`VBA_WRITE applied: ${r.written} written, ${r.skipped} skipped.`,"ok");
 
-      const refreshStart=performance.now();
-      await refreshFiles();
-      const refreshMs=performance.now()-refreshStart;
+      // Explorer owns its own refresh when opened; do not reread the corpus on the Console hot path.
       const totalMs=performance.now()-writeStartedAt;
       const readPart=Number.isFinite(timing.clipboardReadMs)?`read ${fmtMs(timing.clipboardReadMs)} · `:"";
       const wt=r.timing||{};
-      log(`Write timing: ${readPart}parse ${fmtMs(parseMs)} · apply ${fmtMs(wt.totalMs||0)} (exists ${fmtMs(wt.existsMs||0)} · files ${fmtMs(wt.fileWriteMs||0)} · log-read ${fmtMs(wt.logReadMs||0)} · log-write ${fmtMs(wt.logWriteMs||0)}) · indexes ${fmtMs(indexMs)} · refresh ${fmtMs(refreshMs)} · total ${fmtMs(totalMs)}.`,"info");
+      log(`Write timing: ${readPart}parse ${fmtMs(parseMs)} · apply ${fmtMs(wt.totalMs||0)} (exists ${fmtMs(wt.existsMs||0)} · files ${fmtMs(wt.fileWriteMs||0)} · log-read ${fmtMs(wt.logReadMs||0)} · log-write ${fmtMs(wt.logWriteMs||0)}) · indexes ${fmtMs(indexMs)} · refresh deferred · total ${fmtMs(totalMs)}.`,"info");
       $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped · ${fmtMs(totalMs)} total`;
     }catch(e){
       setPasteState("error","Apply failed",e?.message||String(e));log("Apply failed: "+(e?.message||e),"er");
