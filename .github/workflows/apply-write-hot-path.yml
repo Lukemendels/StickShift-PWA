@@ -22,7 +22,20 @@ jobs:
           ref: agent/write-hot-path
 
       - name: Apply patch
-        run: python scripts/patch-write-hot-path.py
+        id: apply
+        continue-on-error: true
+        run: python scripts/patch-write-hot-path.py > patch.log 2>&1
+
+      - name: Upload patch log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: write-hot-path-patch-log
+          path: patch.log
+
+      - name: Require patch success
+        if: steps.apply.outcome == 'failure'
+        run: exit 1
 
       - name: Validate JavaScript syntax
         run: |
