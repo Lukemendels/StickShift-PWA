@@ -23,9 +23,9 @@ function parseWriteEnvelope(text){
 }
 async function applyWrite(env){
   const applyStart=performance.now();
-  const timing={existsMs:0,fileWriteMs:0,logReadMs:0,logWriteMs:0,totalMs:0};
-  let written=0,skipped=0,logLines="";
-  const writtenPaths=[];
+  const timing={existsMs:0,fileWriteMs:0,totalMs:0};
+  let written=0,skipped=0;
+  const writes=[];
   for(const item of env.files){
     const rel=String(item.rel||"").replace(/\\/g,"/").replace(/^\/+/,"");
     const leaf=rel.split("/").pop().toLowerCase();
@@ -40,25 +40,18 @@ async function applyWrite(env){
     timing.fileWriteMs+=performance.now()-stageStart;
 
     written++;
-    writtenPaths.push(rel);
-    logLines+=`- ${stampNow()}  ${existed?"edit":"new"}  ${rel}\n`;
-  }
-  if(logLines){
-    let existing="# Log\n\n";
-    let stageStart=performance.now();
-    const logExists=await fileExists("log.md");
-    timing.logReadMs+=performance.now()-stageStart;
-    if(logExists){
-      stageStart=performance.now();
-      existing=await readFile("log.md");
-      timing.logReadMs+=performance.now()-stageStart;
-    }
-    stageStart=performance.now();
-    await writeFile("log.md",existing+logLines);
-    timing.logWriteMs+=performance.now()-stageStart;
+    writes.push({rel,content:item.content,existed});
   }
   timing.totalMs=performance.now()-applyStart;
-  return {written,skipped,timing,paths:writtenPaths};
+  return {written,skipped,timing,writes};
+}
+
+async function appendWriteAudit(writes){
+  if(!writes?.length) return 0;
+  const started=performance.now();
+  const logLines=writes.map(write=>`- ${stampNow()}  ${write.existed?"edit":"new"}  ${write.rel}\n`).join("");
+  await appendFile("log.md",logLines,"# Log\n\n");
+  return performance.now()-started;
 }
 
 async function writeClip(text){
@@ -160,24 +153,41 @@ async function routePacket(text,timing={}){
     const env=parseWriteEnvelope(text);
     const parseMs=performance.now()-parseStart;
     if(env.error){setPasteState("error","Write parse error",env.error);log(env.error,"er");resetPasteSoon();return;}
+
+    let r;
     try{
-      const r=await applyWrite(env);
+      r=await applyWrite(env);
+    }catch(e){
+      setPasteState("error","Write failed",e?.message||String(e));
+      log("Write failed: "+(e?.message||e),"er");
+      resetPasteSoon();return;
+    }
+
+    const ackMs=performance.now()-writeStartedAt;
+    $("writeMeter").textContent=`${r.written} written · finishing maintenance…`;
+    setPasteState("success",`Written ${r.written} file${r.written===1?"":"s"}`,`File write complete in ${fmtMs(ackMs)}. Finishing audit + affected indexes…`);
+    log(`VBA_WRITE files written: ${r.written} written, ${r.skipped} skipped · acknowledged in ${fmtMs(ackMs)}.`,"ok");
+
+    // Yield one frame so the operator sees the durable-write acknowledgment before maintenance continues.
+    await new Promise(resolve=>requestAnimationFrame(resolve));
+
+    try{
+      const auditMs=await appendWriteAudit(r.writes);
       const indexStart=performance.now();
-      const n=await generateIndexesForPaths(r.paths);
+      const indexResult=await updateIndexesForWrites(r.writes);
       const indexMs=performance.now()-indexStart;
-
-      $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped`;
-      setPasteState("success",`Applied ${r.written} file${r.written===1?"":"s"}`,`Affected indexes regenerated: ${n}.`);
-      log(`VBA_WRITE applied: ${r.written} written, ${r.skipped} skipped.`,"ok");
-
-      // Explorer owns its own refresh when opened; do not reread the corpus on the Console hot path.
       const totalMs=performance.now()-writeStartedAt;
       const readPart=Number.isFinite(timing.clipboardReadMs)?`read ${fmtMs(timing.clipboardReadMs)} · `:"";
       const wt=r.timing||{};
-      log(`Write timing: ${readPart}parse ${fmtMs(parseMs)} · apply ${fmtMs(wt.totalMs||0)} (exists ${fmtMs(wt.existsMs||0)} · files ${fmtMs(wt.fileWriteMs||0)} · log-read ${fmtMs(wt.logReadMs||0)} · log-write ${fmtMs(wt.logWriteMs||0)}) · indexes ${fmtMs(indexMs)} · refresh deferred · total ${fmtMs(totalMs)}.`,"info");
-      $("writeMeter").textContent=`${r.written} written · ${r.skipped} skipped · ${fmtMs(totalMs)} total`;
+      log(`Write timing: ${readPart}parse ${fmtMs(parseMs)} · primary ${fmtMs(wt.totalMs||0)} (exists ${fmtMs(wt.existsMs||0)} · files ${fmtMs(wt.fileWriteMs||0)}) · ack ${fmtMs(ackMs)} · audit ${fmtMs(auditMs)} · indexes ${fmtMs(indexMs)} (${indexResult.mode}) · refresh deferred · total ${fmtMs(totalMs)}.`,"info");
+      $("writeMeter").textContent=`${r.written} written · ${fmtMs(ackMs)} ack · ${fmtMs(totalMs)} settled`;
+      setPasteState("success",`Written ${r.written} file${r.written===1?"":"s"}`,`Maintenance complete: ${indexResult.count} affected index${indexResult.count===1?"":"es"} updated.`);
+      log(`VBA_WRITE maintenance complete: ${indexResult.count} index${indexResult.count===1?"":"es"} updated (${indexResult.mode}).`,"ok");
     }catch(e){
-      setPasteState("error","Apply failed",e?.message||String(e));log("Apply failed: "+(e?.message||e),"er");
+      const totalMs=performance.now()-writeStartedAt;
+      $("writeMeter").textContent=`${r.written} written · ${fmtMs(ackMs)} ack · maintenance incomplete`;
+      setPasteState("error","File written; maintenance incomplete",e?.message||String(e));
+      log(`File write succeeded in ${fmtMs(ackMs)}, but maintenance failed after ${fmtMs(totalMs)}: ${e?.message||e}`,"er");
     }
     resetPasteSoon();return;
   }

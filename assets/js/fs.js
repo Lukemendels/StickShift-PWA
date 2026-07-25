@@ -21,6 +21,18 @@ async function writeFile(path,content){
   await w.write(String(content??""));
   await w.close();
 }
+async function appendFile(path,content,initial=""){
+  const fh=await getFileHandle(path,true);
+  const f=await fh.getFile();
+  const w=await fh.createWritable({keepExistingData:true});
+  if(f.size===0 && initial){
+    await w.write(String(initial)+String(content??""));
+  }else{
+    await w.seek(f.size);
+    await w.write(String(content??""));
+  }
+  await w.close();
+}
 async function fileExists(path){
   try{await getFileHandle(path,false);return true;}catch{return false;}
 }
@@ -115,50 +127,75 @@ async function generateIndexes(){
   return count;
 }
 
-async function generateIndexForDir(dirPath){
-  const dir=await getDirHandle(dirPath,false);
-  const files=[],subs=[];
-  for await(const [name,h] of dir.entries()){
-    if(name.startsWith(".")||isSystemDir(name)) continue;
-    if(h.kind==="directory") subs.push(name);
-    else if(name.toLowerCase().endsWith(".md")) files.push(name);
-  }
-
-  const concepts=files.filter(isConcept).sort();
-  if(!concepts.length&&!subs.length) return 0;
-
-  let out=dirPath===""?`---\nokf_version: "${OKF_VERSION}"\n---\n\n`:"";
-  const entries=await Promise.all(concepts.map(async name=>{
-    const path=dirPath?dirPath+"/"+name:name;
-    return [name,await readFile(path)];
-  }));
-  for(const [name,content] of entries) out+=entryLine(name,content)+"\n";
-  if(concepts.length) out+="\n";
-  if(subs.length){
-    out+="# Subdirectories\n";
-    for(const s of subs.sort()) out+=`* [${s}](${s}/index.md)\n`;
-    out+="\n";
-  }
-  await writeFile(dirPath?dirPath+"/index.md":"index.md",out);
-  return 1;
+function indexEntryTarget(line){
+  const m=String(line||"").match(/^\* \[[^\]]*\]\(([^)]+)\)(?: - .*)?$/);
+  return m?m[1]:"";
 }
 
-async function generateIndexesForPaths(paths){
-  if(!requireRoot()) return 0;
-  const dirs=new Set([""]);
-  for(const raw of paths||[]){
-    const rel=String(raw||"").replace(/\\/g,"/").replace(/^\/+/,"");
-    const parts=rel.split("/").filter(Boolean);
-    parts.pop();
-    let current="";
-    for(const part of parts){
-      if(part.startsWith(".")||isSystemDir(part)) break;
-      current=current?current+"/"+part:part;
-      dirs.add(current);
-    }
+async function patchIndexForWrites(dirPath,writes){
+  const indexPath=dirPath?dirPath+"/index.md":"index.md";
+  if(!await fileExists(indexPath)) return false;
+
+  const current=await readFile(indexPath);
+  const lines=String(current||"").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+  const subAt=lines.findIndex(line=>line.trim()==="# Subdirectories");
+  const conceptEnd=subAt>=0?subAt:lines.length;
+  const entries=new Map();
+
+  for(let i=0;i<conceptEnd;i++){
+    const target=indexEntryTarget(lines[i]);
+    if(target && target.toLowerCase().endsWith(".md") && target.toLowerCase()!=="index.md") entries.set(target,lines[i]);
   }
-  const counts=await Promise.all([...dirs].map(generateIndexForDir));
-  return counts.reduce((sum,n)=>sum+n,0);
+
+  for(const write of writes){
+    const name=write.rel.split("/").pop();
+    entries.set(name,entryLine(name,write.content));
+  }
+
+  const conceptLines=[...entries.entries()]
+    .sort(([a],[b])=>a.localeCompare(b))
+    .map(([,line])=>line);
+
+  let out=dirPath===""?`---
+okf_version: "${OKF_VERSION}"
+---
+
+`:"";
+  if(conceptLines.length) out+=conceptLines.join("\n")+"\n\n";
+  if(subAt>=0){
+    const subSection=lines.slice(subAt).join("\n").trimEnd();
+    if(subSection) out+=subSection+"\n";
+  }
+
+  await writeFile(indexPath,out);
+  return true;
+}
+
+async function updateIndexesForWrites(writes){
+  if(!requireRoot()) return {count:0,mode:"none"};
+  const grouped=new Map();
+
+  for(const write of writes||[]){
+    const rel=String(write.rel||"").replace(/\\/g,"/").replace(/^\/+/,"");
+    const parts=rel.split("/").filter(Boolean);
+    const name=parts.pop();
+    if(!name||!isConcept(name)) continue;
+    if(parts.some(part=>part.startsWith(".")||isSystemDir(part))) continue;
+    const dirPath=parts.join("/");
+    if(!grouped.has(dirPath)) grouped.set(dirPath,[]);
+    grouped.get(dirPath).push({...write,rel});
+  }
+
+  if(!grouped.size) return {count:0,mode:"none"};
+
+  const indexPaths=[...grouped.keys()].map(dirPath=>dirPath?dirPath+"/index.md":"index.md");
+  const available=await Promise.all(indexPaths.map(fileExists));
+  if(available.some(ok=>!ok)){
+    return {count:await generateIndexes(),mode:"full"};
+  }
+
+  const patched=await Promise.all([...grouped.entries()].map(([dirPath,items])=>patchIndexForWrites(dirPath,items)));
+  return {count:patched.filter(Boolean).length,mode:"patch"};
 }
 
 function bundleAnchor(path,content,layer){
