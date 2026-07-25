@@ -1,4 +1,4 @@
-name: Apply write hot-path patch
+name: Validate write hot-path patch
 
 on:
   push:
@@ -8,12 +8,8 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-
 jobs:
-  patch:
-    if: github.actor != 'github-actions[bot]'
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
@@ -21,33 +17,17 @@ jobs:
         with:
           ref: agent/write-hot-path
 
-      - name: Apply patch
-        id: apply
-        continue-on-error: true
-        run: python scripts/patch-write-hot-path.py > patch.log 2>&1
-
-      - name: Upload patch log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: write-hot-path-patch-log
-          path: patch.log
-
-      - name: Require patch success
-        if: steps.apply.outcome == 'failure'
-        run: exit 1
-
       - name: Validate JavaScript syntax
         run: |
           node --check assets/js/fs.js
           node --check assets/js/packets.js
           node --check sw.js
-          git diff --check -- assets/js/fs.js assets/js/packets.js index.html sw.js
 
-      - name: Commit product diff
+      - name: Assert hot-path contract
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add assets/js/fs.js assets/js/packets.js index.html sw.js
-          git commit -m "Optimize write packet hot path"
-          git push origin HEAD:agent/write-hot-path
+          grep -q 'generateIndexesForPaths(r.paths)' assets/js/packets.js
+          grep -q 'refresh deferred' assets/js/packets.js
+          grep -q 'async function generateIndexesForPaths' assets/js/fs.js
+          grep -q 'assets/js/fs.js?v=6' index.html
+          grep -q 'assets/js/packets.js?v=6' index.html
+          git diff --check origin/main...HEAD -- assets/js/fs.js assets/js/packets.js index.html sw.js
