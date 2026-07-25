@@ -30,4 +30,4 @@ jobs:
           grep -q 'async function generateIndexesForPaths' assets/js/fs.js
           grep -q 'assets/js/fs.js?v=6' index.html
           grep -q 'assets/js/packets.js?v=6' index.html
-          git diff --check origin/main...HEAD -- assets/js/fs.js assets/js/packets.js index.html sw.js
+          git diff --check -- assets/js/fs.js assets/js/packets.js index.html sw.js
