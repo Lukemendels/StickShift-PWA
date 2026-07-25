@@ -1,0 +1,44 @@
+name: Apply write acknowledgment patch
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/write-ack-maintenance
+
+      - name: Apply patch
+        run: python scripts/patch-write-ack-maintenance.py
+
+      - name: Validate JavaScript syntax and contract
+        run: |
+          node --check assets/js/fs.js
+          node --check assets/js/packets.js
+          node --check sw.js
+          grep -q 'ack ${fmtMs(ackMs)}' assets/js/packets.js
+          grep -q 'appendWriteAudit' assets/js/packets.js
+          grep -q 'updateIndexesForWrites' assets/js/packets.js
+          grep -q 'async function appendFile' assets/js/fs.js
+          grep -q 'mode:"patch"' assets/js/fs.js
+          grep -q 'assets/js/fs.js?v=7' index.html
+          grep -q 'assets/js/packets.js?v=7' index.html
+          git diff --check -- assets/js/fs.js assets/js/packets.js index.html sw.js
+
+      - name: Commit product diff
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/js/fs.js assets/js/packets.js index.html sw.js
+          git commit -m "Acknowledge writes before maintenance"
+          git push origin HEAD:agent/write-ack-maintenance
