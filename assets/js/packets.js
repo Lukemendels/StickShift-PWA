@@ -1,3 +1,5 @@
+const CLIPBOARD_SAFE_CHARS = 18000;
+
 function parseWriteEnvelope(text){
   const m=String(text||"").match(/<VBA_WRITE>([\s\S]*?)<\/VBA_WRITE>/i);
   if(!m) return {error:"No <VBA_WRITE> block found."};
@@ -70,14 +72,54 @@ function openManualPaste(prefill=""){
   setTimeout(()=>$("manualPacket").focus(),50);
 }
 function closeManualPaste(){$("pasteModal").classList.remove("open");}
+function fmtMs(ms){return `${Math.max(0,Math.round(ms))} ms`;}
+
+async function deliverContextBundle(r){
+  const path=`${DIST_DIR}/StickShift-context.md`;
+  const safe=r.chars<=CLIPBOARD_SAFE_CHARS;
+  $("bundleOut").value=r.text;
+  $("btnCopy").disabled=!safe;
+
+  let copied=false,copyMs=0,distMs=0;
+  if(safe){
+    const copyStart=performance.now();
+    copied=await writeClip(r.text);
+    copyMs=performance.now()-copyStart;
+
+    if(copied){
+      $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · copied · saving -dist backup…`;
+      setPasteState("success","Context copied",`Copied to clipboard. Saving a backup to ${path}.`);
+    }else{
+      $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · clipboard unavailable · saving to -dist…`;
+      setPasteState("","Clipboard copy unavailable",`Saving to ${path}; you can use that file or tap Copy again.`);
+    }
+
+    const distStart=performance.now();
+    await writeFile(path,r.text);
+    distMs=performance.now()-distStart;
+    $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · ${copied?"clipboard copied · ":""}backup saved to ${path}`;
+    if(!copied) setPasteState("success","Context saved to -dist",`Clipboard copy was unavailable. Use ${path} as the context packet, or tap Copy again.`);
+  }else{
+    const distStart=performance.now();
+    await writeFile(path,r.text);
+    distMs=performance.now()-distStart;
+    $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · overflow · ${path}`;
+    setPasteState("success","Context exceeds clipboard-safe size",`Saved to ${path}. Use that file as the context packet.`);
+  }
+
+  return {safe,copied,overflow:!safe,copyMs,distMs};
+}
 
 async function readClipboardAndRoute(){
+  const startedAt=performance.now();
   setPasteState("active","Reading clipboard…","StickShift will only act on a recognized packet.");
   if(navigator.clipboard?.readText && window.isSecureContext){
     try{
+      const readStart=performance.now();
       const text=(await navigator.clipboard.readText()).trim();
+      const clipboardReadMs=performance.now()-readStart;
       if(!text){openManualPaste();setPasteState("","Clipboard was empty","Paste the packet manually.");return;}
-      await routePacket(text);
+      await routePacket(text,{startedAt,clipboardReadMs});
       return;
     }catch(e){
       log("Direct clipboard read unavailable: "+(e?.message||e),"amb");
@@ -87,7 +129,7 @@ async function readClipboardAndRoute(){
   setPasteState("","Manual paste needed","Long-press in the sheet and paste the packet.");
 }
 
-async function routePacket(text){
+async function routePacket(text,timing={}){
   text=String(text||"").trim();
   if(!text){setPasteState("error","No packet found","Paste or copy a StickShift packet first.");resetPasteSoon();return;}
   if(text.includes("<VBA_WRITE>")){
@@ -110,17 +152,20 @@ async function routePacket(text){
     if(!requireRoot()){setPasteState("error","Context not engaged","Switch context first.");resetPasteSoon();return;}
     try{
       const req=parseContextRequest(text);
+      const buildStart=performance.now();
       const r=await buildBundleFromRequest(req);
-      await writeFile(`${DIST_DIR}/StickShift-context.md`,r.text);
-      $("bundleOut").value=r.text;$("btnCopy").disabled=false;
-      const copied=r.chars<=DIST_THRESHOLD?await writeClip(r.text):false;
-      $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · saved to ${DIST_DIR}/StickShift-context.md`;
-      setPasteState("success","Context bundle built",copied?"Saved and copied to clipboard.":"Saved to -dist; clipboard copy was unavailable.");
+      const buildMs=performance.now()-buildStart;
+      const delivery=await deliverContextBundle(r);
+      const totalMs=timing.startedAt?performance.now()-timing.startedAt:buildMs+delivery.copyMs+delivery.distMs;
+      const readPart=Number.isFinite(timing.clipboardReadMs)?`read ${fmtMs(timing.clipboardReadMs)} · `:"";
+      const copyPart=delivery.safe?`clip ${fmtMs(delivery.copyMs)} · `:"clip skipped · ";
+      log(`Context timing: ${readPart}build ${fmtMs(buildMs)} · ${copyPart}-dist ${fmtMs(delivery.distMs)} · total ${fmtMs(totalMs)}.`,"info");
       log(`CONTEXT_REQUEST built: ${r.f+r.m+r.s} concepts.`,"ok");
+      if(!delivery.overflow) resetPasteSoon();
     }catch(e){
-      setPasteState("error","Build failed",e?.message||String(e));log("Build failed: "+(e?.message||e),"er");
+      setPasteState("error","Build failed",e?.message||String(e));log("Build failed: "+(e?.message||e),"er");resetPasteSoon();
     }
-    resetPasteSoon();return;
+    return;
   }
   if(text.includes("<HTML_OPEN>")){
     setPasteState("success","HTML_OPEN recognized","Tool launching remains a deliberate approval step; this mobile runtime test does not auto-open a tool from clipboard.");
@@ -135,12 +180,12 @@ async function routePacket(text){
 async function doBuild(){
   if(!requireRoot()) return;
   try{
+    const buildStart=performance.now();
     const r=await buildIndexBundle();
-    await writeFile(`${DIST_DIR}/StickShift-context.md`,r.text);
-    $("bundleOut").value=r.text;$("btnCopy").disabled=false;
-    const copied=r.chars<=DIST_THRESHOLD?await writeClip(r.text):false;
-    $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · saved to ${DIST_DIR}/StickShift-context.md`;
-    log(`Index bundle built${copied?" and copied":""}.`,"ok");
+    const buildMs=performance.now()-buildStart;
+    const delivery=await deliverContextBundle(r);
+    log(`Index timing: build ${fmtMs(buildMs)} · ${delivery.safe?`clip ${fmtMs(delivery.copyMs)}`:"clip skipped"} · -dist ${fmtMs(delivery.distMs)}.`,"info");
+    log(`Index bundle built${delivery.copied?" and copied":delivery.overflow?" to -dist overflow":""}.`,"ok");
   }catch(e){log("Bundle build failed: "+(e?.message||e),"er");}
 }
 
