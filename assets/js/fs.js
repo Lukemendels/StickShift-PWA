@@ -21,6 +21,16 @@ async function writeFile(path,content){
   await w.write(String(content??""));
   await w.close();
 }
+async function removeFile(path){
+  const parts=String(path||"").split("/").filter(Boolean);
+  const name=parts.pop();
+  if(!name) return false;
+  const dir=await getDirHandle(parts.join("/"),false);
+  try{await dir.removeEntry(name);return true;}catch(e){
+    if(e?.name==="NotFoundError") return false;
+    throw e;
+  }
+}
 async function appendFile(path,content,initial=""){
   const fh=await getFileHandle(path,true);
   const f=await fh.getFile();
@@ -93,37 +103,56 @@ function entryLine(name,content){
   const fm=parseFrontmatter(content);
   return `* [${fm.title||name.replace(/\.md$/i,"")}](${name})${fm.description?" - "+fm.description:""}`;
 }
+
+async function scanIndexTree(dir,prefix="",name=""){
+  const concepts=[];
+  const children=[];
+  for await(const [entryName,h] of dir.entries()){
+    if(entryName.startsWith(".")||isSystemDir(entryName)) continue;
+    if(h.kind==="directory"){
+      const childPrefix=prefix?prefix+"/"+entryName:entryName;
+      children.push(await scanIndexTree(h,childPrefix,entryName));
+    }else if(isConcept(entryName)){
+      concepts.push(entryName);
+    }
+  }
+  concepts.sort();
+  children.sort((a,b)=>a.name.localeCompare(b.name));
+  const qualifyingChildren=children.filter(child=>child.qualifies);
+  const qualifies=prefix===""||concepts.length>0||qualifyingChildren.length>0;
+  return {dir:prefix,name,concepts,children,qualifyingChildren,qualifies};
+}
+
 async function generateIndexes(){
   if(!requireRoot()) return 0;
-  const dirs=[];
-  async function rec(dir,prefix){
-    const files=[],subs=[];
-    for await(const [name,h] of dir.entries()){
-      if(name.startsWith(".")||isSystemDir(name)) continue;
-      if(h.kind==="directory"){subs.push(name);await rec(h,prefix?prefix+"/"+name:name);}
-      else if(name.toLowerCase().endsWith(".md")) files.push(name);
-    }
-    dirs.push({dir:prefix,files,subs});
-  }
-  await rec(ROOT,"");
+  const tree=await scanIndexTree(ROOT);
   let count=0;
-  for(const d of dirs){
-    const concepts=d.files.filter(isConcept).sort();
-    if(!concepts.length&&!d.subs.length) continue;
-    let out=d.dir===""?`---\nokf_version: "${OKF_VERSION}"\n---\n\n`:"";
-    for(const name of concepts){
-      const path=d.dir?d.dir+"/"+name:name;
-      out+=entryLine(name,await readFile(path))+"\n";
+
+  async function writeNode(node){
+    for(const child of node.children) await writeNode(child);
+
+    const indexPath=node.dir?node.dir+"/index.md":"index.md";
+    if(!node.qualifies){
+      if(node.dir&&await fileExists(indexPath)) await removeFile(indexPath);
+      return;
     }
-    if(concepts.length) out+="\n";
-    if(d.subs.length){
+
+    let out=node.dir===""?`---\nokf_version: "${OKF_VERSION}"\n---\n\n`:"";
+    for(const conceptName of node.concepts){
+      const path=node.dir?node.dir+"/"+conceptName:conceptName;
+      out+=entryLine(conceptName,await readFile(path))+"\n";
+    }
+    if(node.concepts.length) out+="\n";
+    if(node.qualifyingChildren.length){
       out+="# Subdirectories\n";
-      for(const s of d.subs.sort()) out+=`* [${s}](${s}/index.md)\n`;
+      for(const child of node.qualifyingChildren) out+=`* [${child.name}](${child.name}/index.md)\n`;
       out+="\n";
     }
-    await writeFile(d.dir?d.dir+"/index.md":"index.md",out);
+    await writeFile(indexPath,out);
     count++;
   }
+
+  await writeNode(tree);
   return count;
 }
 

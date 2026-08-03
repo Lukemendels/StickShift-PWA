@@ -1,13 +1,13 @@
-const CACHE_NAME = "stickshift-pwa-v8";
+const CACHE_NAME = "stickshift-pwa-v9";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./assets/app.css",
-  "./assets/js/core.js",
-  "./assets/js/fs.js?v=8",
-  "./assets/js/packets.js?v=8",
-  "./assets/js/ui.js",
+  "./assets/app.css?v=9",
+  "./assets/js/core.js?v=9",
+  "./assets/js/fs.js?v=9",
+  "./assets/js/packets.js?v=9",
+  "./assets/js/ui.js?v=9",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

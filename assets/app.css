@@ -126,6 +126,9 @@ code{font-family:var(--mono)}
 }
 .card .body{padding:14px}
 .hint{margin:0 0 12px;color:var(--ink-faint);font-size:12.5px}
+.hint strong{color:var(--ink-dim)}
+.compact-hint{padding:9px 10px;border-left:3px solid var(--cyan-dim);background:rgba(5,36,58,.34);font-size:11.5px}
+.utility-card{margin-top:14px}
 .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 .row.between{justify-content:space-between}
 .paste{
@@ -159,9 +162,29 @@ code{font-family:var(--mono)}
 .log .ok{color:var(--green)} .log .er{color:#f0a39a} .log .amb{color:var(--cyan)} .log .info{color:var(--ink-dim)}
 .workspace{display:grid;grid-template-columns:280px minmax(0,1fr);min-height:55vh;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel-2)}
 .file-list{border-right:1px solid var(--line);background:#062f4d;overflow:auto;max-height:70vh}
-.file-row{padding:9px 12px;border-left:3px solid transparent;font:11.5px/1.35 var(--mono);color:var(--ink-dim);word-break:break-word;cursor:pointer}
-.file-row.active{border-left-color:var(--cyan);background:rgba(50,183,201,.08);color:var(--ink)}
+.file-row{
+  --depth:0;
+  min-height:38px;
+  padding:8px 10px 8px calc(10px + var(--depth) * 17px);
+  border-left:3px solid transparent;
+  font:11.5px/1.35 var(--mono);
+  color:var(--ink-dim);
+  word-break:break-word;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  outline:none;
+}
+.file-row:focus-visible{box-shadow:inset 0 0 0 1px var(--cyan)}
+.folder-row{color:var(--ink);background:rgba(11,69,105,.46);font-weight:700}
+.folder-row:hover,.file-node:hover{background:rgba(50,183,201,.07)}
+.file-row.active{border-left-color:var(--cyan);background:rgba(50,183,201,.12);color:var(--ink)}
 .file-row.system{color:var(--ink-faint)}
+.tree-caret,.tree-spacer{width:13px;flex:0 0 13px;text-align:center;color:var(--cyan)}
+.tree-spacer::before{content:"·";color:var(--ink-faint)}
+.tree-name{min-width:0;overflow-wrap:anywhere}
+.empty-row{cursor:default;color:var(--ink-faint)}
 .editor{min-width:0;display:flex;flex-direction:column}
 .editor-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 11px;border-bottom:1px solid var(--line);background:var(--panel-3)}
 .editor-path{flex:1;min-width:120px;font:11px/1.4 var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -194,7 +217,7 @@ code{font-family:var(--mono)}
   .paste{min-height:150px;padding:18px}
   .paste .title{font-size:18px}
   .workspace{grid-template-columns:1fr;min-height:0}
-  .file-list{border-right:0;border-bottom:1px solid var(--line);max-height:220px}
+  .file-list{border-right:0;border-bottom:1px solid var(--line);max-height:300px}
   .editor-body{min-height:320px;padding:11px}
   .editor-body textarea{min-height:300px}
   .diag-grid{grid-template-columns:1fr}

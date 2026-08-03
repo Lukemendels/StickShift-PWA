@@ -22,6 +22,7 @@ let ROOT_NAME = "";
 let FILES = new Map();
 let ACTIVE_PATH = "";
 let EDIT_MODE = false;
+const EXPANDED_DIRS = new Set();
 
 function log(msg, cls="info"){
   const line = document.createElement("div");
@@ -140,26 +141,36 @@ async function requestPermission(handle, write=true){
 }
 
 function setEngaged(handle){
+  const contextChanged=ROOT!==handle;
   ROOT=handle||null;
   ROOT_NAME=handle?.name||"";
   const path=$("ctxPath");
+  const buildButton=$("btnBuild");
+  if(contextChanged){
+    FILES.clear();
+    ACTIVE_PATH="";
+    EDIT_MODE=false;
+    EXPANDED_DIRS.clear();
+  }
   if(ROOT){
     $("gate").classList.add("engaged");
     $("gearVal").textContent="1";
     path.textContent=ROOT_NAME;
     path.classList.remove("none");
-    $("ctxMeter").textContent="Ready. Tap the receiver to read a StickShift packet.";
+    if(buildButton) buildButton.disabled=false;
+    $("ctxMeter").textContent="Ready. Start a chat with context or tap the receiver to route a StickShift packet.";
   }else{
     $("gate").classList.remove("engaged");
     $("gearVal").textContent="N";
     path.textContent="— no context engaged —";
     path.classList.add("none");
+    if(buildButton) buildButton.disabled=true;
     $("ctxMeter").textContent="";
   }
 }
 function requireRoot(){
   if(ROOT) return true;
-  log("No context engaged — tap Switch context first.","er");
+  log("No context engaged — tap Select context first.","er");
   return false;
 }
 
@@ -184,7 +195,7 @@ async function switchContext(){
     log(`Context engaged: ${handle.name}`,"ok");
     return true;
   }catch(e){
-    if(e?.name!=="AbortError") log("Switch context failed: "+(e?.message||e),"er");
+    if(e?.name!=="AbortError") log("Select context failed: "+(e?.message||e),"er");
     return false;
   }
 }

@@ -11,7 +11,7 @@
 <link href="./manifest.webmanifest" rel="manifest"/>
 <meta content="StickShift" name="application-name"/>
 <title>StickShift</title>
-<link href="./assets/app.css" rel="stylesheet"/>
+<link href="./assets/app.css?v=9" rel="stylesheet"/>
 </head>
 <body>
 <div class="wrap">
@@ -27,8 +27,8 @@
 <div class="gear"><span class="lbl">GEAR</span><span class="val" id="gearVal">N</span></div>
 <div class="ctx"><span class="k">ENGAGED CONTEXT</span><span class="v none" id="ctxPath">— no context engaged —</span></div>
 <div class="acts">
-<button id="btnCopySkill">Copy AI skill</button>
-<button class="primary" id="btnSwitch">Switch context</button>
+<button class="primary" disabled="" id="btnBuild">Start chat with context</button>
+<button id="btnSwitch">Select context</button>
 </div>
 </div>
 <div class="meter" id="ctxMeter"> </div>
@@ -48,11 +48,11 @@
 </div>
 <div class="bays">
 <section class="card">
-<h2>◄ Pull — Start a chat with context</h2>
+<h2>◄ Pull — Session bootstrap</h2>
 <div class="body">
-<p class="hint">Build one paste containing the StickShift Operator skill and a map-only workspace index. Gated folders expose only a discovery stub. The result is copied and always saved to <code>-dist/StickShift-context.md</code>.</p>
+<p class="hint">The header action builds one paste containing the StickShift Operator skill and a map-only workspace index. Gated folders expose only a discovery stub. The same payload is always saved to <code>-dist/StickShift-context.md</code>.</p>
+<p class="hint compact-hint">Above 20k on Android, long-press the destination text field and choose <strong>Paste</strong>. Gboard clipboard history may truncate. Use <code>-dist</code> for structured Markdown or maximum reliability.</p>
 <div class="row">
-<button class="primary" id="btnBuild">Build session bootstrap</button>
 <button disabled="" id="btnCopy">Copy again</button>
 </div>
 <div class="meter" id="bundleMeter"></div>
@@ -80,7 +80,7 @@
 </section>
 <section class="panel" hidden="" id="viewExplorer">
 <div class="workspace">
-<aside class="file-list" id="fileList"><div class="file-row">Engage a context to browse files.</div></aside>
+<aside class="file-list" id="fileList"><div class="file-row empty-row">Engage a context to browse files.</div></aside>
 <div class="editor">
 <div class="editor-head">
 <span class="editor-path" id="editorPath">No file selected</span>
@@ -102,6 +102,13 @@
 <button id="btnRefreshDiag">Refresh diagnostics</button>
 <button id="btnReconnect">Reconnect saved context</button>
 </div>
+</div>
+</div>
+<div class="card utility-card">
+<h2>Operator utility</h2>
+<div class="body">
+<p class="hint">Session bootstrap already includes the complete Operator skill. Use this utility only when you need the skill by itself.</p>
+<button id="btnCopySkill">Copy embedded Operator skill</button>
 </div>
 </div>
 </section>
@@ -232,10 +239,10 @@ A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatt
 
 StickShift may also recognize HTML_OPEN packets for installed tools. When emitting an `HTML_OPEN` packet, wrap the complete packet in a `text` fenced code block under the same packet formatting contract. The mobile PWA currently recognizes this packet type but does not automatically launch a tool, so do not depend on automatic tool launch in the mobile workflow.
 </script>
-<script src="./assets/js/core.js"></script>
-<script src="./assets/js/fs.js?v=8"></script>
-<script src="./assets/js/packets.js?v=8"></script>
-<script src="./assets/js/ui.js"></script>
+<script src="./assets/js/core.js?v=9"></script>
+<script src="./assets/js/fs.js?v=9"></script>
+<script src="./assets/js/packets.js?v=9"></script>
+<script src="./assets/js/ui.js?v=9"></script>
 <script>
 if ("serviceWorker" in navigator) {
   let reloadingForWorkerUpdate = false;

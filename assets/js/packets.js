@@ -87,6 +87,9 @@ function openManualPaste(prefill=""){
 }
 function closeManualPaste(){$("pasteModal").classList.remove("open");}
 function fmtMs(ms){return `${Math.max(0,Math.round(ms))} ms`;}
+function largePasteGuidance(path){
+  return `Full payload copied. On Android, long-press the destination text field and choose Paste; Gboard clipboard history may truncate near 20,000 characters. For structured Markdown or maximum reliability, use ${path}.`;
+}
 
 async function deliverContextBundle(r){
   const path=`${DIST_DIR}/StickShift-context.md`;
@@ -106,13 +109,13 @@ async function deliverContextBundle(r){
   const size=`${r.chars.toLocaleString()} chars`;
   const mapped=r.bootstrap?`${count} maps + operator skill`:`${count} concepts`;
   const clipboardState=copied?"clipboard copied":"clipboard unavailable";
-  const portability=portable?"plain-text portable":"over 20k; app handling may vary";
+  const portability=portable?"plain-text portable":"over 20k; native Paste recommended";
   $("bundleMeter").textContent=`${mapped} · ${size} · ${clipboardState} · ${portability} · saved to ${path}`;
 
   if(copied&&portable){
     setPasteState("success",r.bootstrap?"Session bootstrap copied":"Context copied",`Copied as plain text and saved to ${path}.`);
   }else if(copied){
-    setPasteState("success",r.bootstrap?"Large session bootstrap copied":"Large context copied",`Paste handling may vary above 20,000 characters; some apps convert large pastes to attachments. Reliable fallback saved to ${path}.`);
+    setPasteState("success",r.bootstrap?"Large session bootstrap copied":"Large context copied",largePasteGuidance(path));
   }else{
     setPasteState("success","Context saved to -dist",`Clipboard copy was unavailable. Use ${path} as the reliable fallback, or tap Copy again.`);
   }
@@ -143,7 +146,7 @@ async function routePacket(text,timing={}){
   text=String(text||"").trim();
   if(!text){setPasteState("error","No packet found","Paste or copy a StickShift packet first.");resetPasteSoon();return;}
   if(text.includes("<VBA_WRITE>")){
-    if(!requireRoot()){setPasteState("error","Context not engaged","Switch context first.");resetPasteSoon();return;}
+    if(!requireRoot()){setPasteState("error","Context not engaged","Select context first.");resetPasteSoon();return;}
     const writeStartedAt=Number.isFinite(timing.startedAt)?timing.startedAt:performance.now();
     const parseStart=performance.now();
     const env=parseWriteEnvelope(text);
@@ -188,7 +191,7 @@ async function routePacket(text,timing={}){
     resetPasteSoon();return;
   }
   if(text.includes("<CONTEXT_REQUEST>")){
-    if(!requireRoot()){setPasteState("error","Context not engaged","Switch context first.");resetPasteSoon();return;}
+    if(!requireRoot()){setPasteState("error","Context not engaged","Select context first.");resetPasteSoon();return;}
     try{
       const req=parseContextRequest(text);
       const buildStart=performance.now();
@@ -218,6 +221,10 @@ async function routePacket(text,timing={}){
 
 async function doBuild(){
   if(!requireRoot()) return;
+  const button=$("btnBuild");
+  const idleLabel="Start chat with context";
+  button.disabled=true;
+  button.textContent="Building bootstrap…";
   try{
     const buildStart=performance.now();
     const r=await buildSessionBootstrap();
@@ -226,7 +233,13 @@ async function doBuild(){
     const copyPart=delivery.copied?`clip ${fmtMs(delivery.copyMs)}`:"clip unavailable";
     log(`Bootstrap timing: build ${fmtMs(buildMs)} · ${copyPart} · -dist ${fmtMs(delivery.distMs)}.`,"info");
     log(`Session bootstrap built: ${r.m} maps${r.gated?` · ${r.gated} gated`:""} · operator skill included.`,"ok");
-  }catch(e){log("Bootstrap build failed: "+(e?.message||e),"er");}
+    button.textContent=delivery.copied?"Bootstrap copied":"Bootstrap saved";
+    setTimeout(()=>{button.textContent=idleLabel;button.disabled=!ROOT;},1800);
+  }catch(e){
+    log("Bootstrap build failed: "+(e?.message||e),"er");
+    button.textContent=idleLabel;
+    button.disabled=!ROOT;
+  }
 }
 
 async function refreshFiles(){
@@ -235,17 +248,71 @@ async function refreshFiles(){
   }
   try{
     FILES=await walkMarkdown({includeSystem:true});
+    expandActiveAncestors();
     renderFileList();
     if(ACTIVE_PATH && FILES.has(ACTIVE_PATH)) renderActiveFile();
-    else if(ACTIVE_PATH){ACTIVE_PATH="";renderActiveFile();}
+    else if(ACTIVE_PATH){ACTIVE_PATH="";EDIT_MODE=false;renderActiveFile();}
   }catch(e){log("File refresh failed: "+(e?.message||e),"er");}
+}
+function explorerVisiblePaths(){
+  return [...FILES.keys()]
+    .filter(path=>path.split("/").pop().toLowerCase()!=="index.md")
+    .sort((a,b)=>a.localeCompare(b));
+}
+function buildExplorerTree(paths){
+  const root={folders:new Map(),files:[]};
+  for(const path of paths){
+    const parts=path.split("/").filter(Boolean);
+    const file=parts.pop();
+    let node=root;
+    let prefix="";
+    for(const folder of parts){
+      prefix=prefix?prefix+"/"+folder:folder;
+      if(!node.folders.has(folder)) node.folders.set(folder,{path:prefix,folders:new Map(),files:[]});
+      node=node.folders.get(folder);
+    }
+    node.files.push({name:file,path});
+  }
+  return root;
+}
+function expandActiveAncestors(){
+  if(!ACTIVE_PATH) return;
+  const parts=ACTIVE_PATH.split("/").filter(Boolean);
+  parts.pop();
+  let current="";
+  for(const part of parts){
+    current=current?current+"/"+part:part;
+    EXPANDED_DIRS.add(current);
+  }
 }
 function renderFileList(){
   const el=$("fileList");
-  if(!ROOT){el.innerHTML='<div class="file-row">Engage a context to browse files.</div>';return;}
-  const paths=[...FILES.keys()].sort();
-  if(!paths.length){el.innerHTML='<div class="file-row">No Markdown files found.</div>';return;}
-  el.innerHTML=paths.map(p=>`<div class="file-row${p===ACTIVE_PATH?" active":""}${p.startsWith(DIST_DIR+"/")?" system":""}" data-path="${escapeHtml(p)}">${escapeHtml(p)}</div>`).join("");
+  if(!ROOT){el.innerHTML='<div class="file-row empty-row">Engage a context to browse files.</div>';return;}
+  const paths=explorerVisiblePaths();
+  if(!paths.length){el.innerHTML='<div class="file-row empty-row">No user-facing Markdown files found.</div>';return;}
+
+  expandActiveAncestors();
+  const tree=buildExplorerTree(paths);
+  const rows=[];
+  function renderNode(node,depth){
+    for(const [name,folder] of [...node.folders.entries()].sort(([a],[b])=>a.localeCompare(b))){
+      const expanded=EXPANDED_DIRS.has(folder.path);
+      const system=folder.path===DIST_DIR||folder.path.startsWith(DIST_DIR+"/");
+      rows.push(`<div class="file-row folder-row${system?" system":""}" data-folder="${escapeHtml(folder.path)}" role="button" tabindex="0" aria-expanded="${expanded}" style="--depth:${depth}"><span class="tree-caret" aria-hidden="true">${expanded?"▾":"▸"}</span><span class="tree-name">${escapeHtml(name)}</span></div>`);
+      if(expanded) renderNode(folder,depth+1);
+    }
+    for(const file of node.files.sort((a,b)=>a.name.localeCompare(b.name))){
+      const system=file.path.startsWith(DIST_DIR+"/");
+      rows.push(`<div class="file-row file-node${file.path===ACTIVE_PATH?" active":""}${system?" system":""}" data-path="${escapeHtml(file.path)}" role="button" tabindex="0" style="--depth:${depth}"><span class="tree-spacer" aria-hidden="true"></span><span class="tree-name">${escapeHtml(file.name)}</span></div>`);
+    }
+  }
+  renderNode(tree,0);
+  el.innerHTML=rows.join("");
+}
+function toggleExplorerFolder(path){
+  if(EXPANDED_DIRS.has(path)) EXPANDED_DIRS.delete(path);
+  else EXPANDED_DIRS.add(path);
+  renderFileList();
 }
 function renderActiveFile(){
   $("editorPath").textContent=ACTIVE_PATH||"No file selected";
