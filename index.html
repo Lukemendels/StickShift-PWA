@@ -48,15 +48,15 @@
 </div>
 <div class="bays">
 <section class="card">
-<h2>◄ Pull — Build context bundle</h2>
+<h2>◄ Pull — Start a chat with context</h2>
 <div class="body">
-<p class="hint">Build the standard index bundle from the engaged OKF folder. The result is written to <code>-dist/StickShift-context.md</code> and copied when clipboard permission allows.</p>
+<p class="hint">Build one paste containing the StickShift Operator skill and a map-only workspace index. Gated folders expose only a discovery stub. The result is copied and always saved to <code>-dist/StickShift-context.md</code>.</p>
 <div class="row">
-<button class="primary" id="btnBuild">Build index bundle</button>
+<button class="primary" id="btnBuild">Build session bootstrap</button>
 <button disabled="" id="btnCopy">Copy again</button>
 </div>
 <div class="meter" id="bundleMeter"></div>
-<textarea class="output" id="bundleOut" placeholder="Generated context bundle appears here." readonly=""></textarea>
+<textarea class="output" id="bundleOut" placeholder="Generated session bootstrap or context bundle appears here." readonly=""></textarea>
 </div>
 </section>
 <section class="card">
@@ -132,6 +132,8 @@ tags: [skill, stickshift, okf, context, filesystem]
 
 StickShift is a human-activated bridge between this AI and a local OKF Markdown workspace. The user controls every transfer. The AI does not have direct filesystem access and must never claim a read or write occurred until the user returns the result from StickShift.
 
+A new consumer-model chat may begin with a StickShift session bootstrap containing this complete skill followed by a map-only workspace index. Treat both parts as current instructions and authoritative workspace discovery context for the session.
+
 ## Core loop
 
 1. When workspace context is needed, emit a StickShift context request.
@@ -150,15 +152,36 @@ Never place a raw StickShift packet outside a code fence. Keep explanatory prose
 
 Treat the index as a discovery map, not the default payload for every read.
 
-- Use `mode: index` when first entering a workspace, when the map may be stale, or when you do not yet know which concept paths are relevant.
-- Once the current conversation contains a sufficiently recent index and the needed paths are known, use `mode: bundle` with `include:` to retrieve only the concepts needed for the task.
+- A session bootstrap already contains the operator skill and a current map. Do not immediately request the index again.
+- Use `mode: index` when the map may be stale, when workspace structure may have changed materially, or when a path cannot be resolved from the current map. An index refresh returns maps only; it does not repeat this skill or automatically load foundation bodies.
+- Once the needed paths are known, use `mode: bundle` with `include:` to retrieve only the concepts needed for the task.
+- Foundation concepts are authoritative but are retrieved on demand in the consumer PWA. Load the relevant foundation files when their exact doctrine, constraints, or operating details materially affect the work.
 - Prefer targeted retrieval over repeatedly requesting the full index.
-- Request the index again when workspace structure may have changed materially, when a path cannot be resolved from the current map, or when the user explicitly asks for a fresh map.
 - Do not assume the contents of a mapped concept from its title or description. Retrieve the concept when its details matter.
+
+## Gated discovery
+
+Some concept frontmatter may declare:
+
+```yaml
+discovery: gated
+discovery_scope: folder
+```
+
+This is a disclosure-minimization instruction. During automatic orientation, StickShift replaces that folder's generated map with a small gated-discovery stub and suppresses maps below it. The folder remains visible, but its contents are not automatically disclosed.
+
+- Do not infer sensitive facts from the existence, name, or stub of a gated folder.
+- Do not request gated context merely for curiosity or broad personalization.
+- Request the gated folder's exact `index.md` when the user asks in that domain or when its personal context could materially change the safety, applicability, or quality of the answer.
+- After retrieving the gated map, request the smallest relevant concept set rather than the entire folder.
+- When relevant gated context is available, do not give confident personalized guidance while knowingly omitting it. Ask to retrieve it first.
+- Gating is not a denial of access. The explicit request and human-operated transfer remain the approval boundary.
+
+For example, a health question may justify requesting `medical_history/index.md` before offering personalized medical guidance, while unrelated work should not expose that map automatically.
 
 ## Request the workspace index
 
-Use this for discovery:
+Use this only when discovery needs refreshing:
 
 ```text
 <CONTEXT_REQUEST>
@@ -203,14 +226,15 @@ A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatt
 - Reuse a sufficiently recent index as the map for subsequent targeted pulls; do not fetch it again without a reason.
 - Keep personal, work, and other corpora separate according to the folder the user engages.
 - The human remains the approval boundary for reads, writes, and tool actions.
+- Large payloads may be converted to attachments or handled differently across chat applications. The copy is still attempted, and `-dist/StickShift-context.md` is the reliable fallback.
 
 ## HTML_OPEN
 
 StickShift may also recognize HTML_OPEN packets for installed tools. When emitting an `HTML_OPEN` packet, wrap the complete packet in a `text` fenced code block under the same packet formatting contract. The mobile PWA currently recognizes this packet type but does not automatically launch a tool, so do not depend on automatic tool launch in the mobile workflow.
 </script>
 <script src="./assets/js/core.js"></script>
-<script src="./assets/js/fs.js?v=7"></script>
-<script src="./assets/js/packets.js?v=7"></script>
+<script src="./assets/js/fs.js?v=8"></script>
+<script src="./assets/js/packets.js?v=8"></script>
 <script src="./assets/js/ui.js"></script>
 <script>
 if ("serviceWorker" in navigator) {
