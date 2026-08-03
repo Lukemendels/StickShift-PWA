@@ -1,26 +1,29 @@
-async function getDirHandle(path,create=false){
-  let dir=ROOT;
+async function getDirHandleFrom(root,path,create=false){
+  let dir=root;
   for(const part of String(path||"").split("/").filter(Boolean)){
     dir=await dir.getDirectoryHandle(part,{create});
   }
   return dir;
 }
-async function getFileHandle(path,create=false){
+async function getDirHandle(path,create=false){return getDirHandleFrom(ROOT,path,create);}
+async function getFileHandleFrom(root,path,create=false){
   const parts=String(path||"").split("/").filter(Boolean);
-  let dir=ROOT;
+  let dir=root;
   for(let i=0;i<parts.length-1;i++) dir=await dir.getDirectoryHandle(parts[i],{create});
   return dir.getFileHandle(parts[parts.length-1],{create});
 }
+async function getFileHandle(path,create=false){return getFileHandleFrom(ROOT,path,create);}
 async function readFile(path){
   const fh=await getFileHandle(path,false);
   return (await fh.getFile()).text();
 }
-async function writeFile(path,content){
-  const fh=await getFileHandle(path,true);
+async function writeFileAtRoot(root,path,content){
+  const fh=await getFileHandleFrom(root,path,true);
   const w=await fh.createWritable();
   await w.write(String(content??""));
   await w.close();
 }
+async function writeFile(path,content){return writeFileAtRoot(ROOT,path,content);}
 async function removeFile(path){
   const parts=String(path||"").split("/").filter(Boolean);
   const name=parts.pop();
@@ -104,6 +107,39 @@ function entryLine(name,content){
   return `* [${fm.title||name.replace(/\.md$/i,"")}](${name})${fm.description?" - "+fm.description:""}`;
 }
 
+const GENERATED_INDEX_SCHEMA = "2";
+
+function isFolderGated(conceptEntries){
+  return conceptEntries.some(([,content])=>{
+    const fm=parseFrontmatter(content);
+    return String(fm.discovery||"").toLowerCase()==="gated" &&
+      String(fm.discovery_scope||"").toLowerCase()==="folder";
+  });
+}
+function generatedIndexFrontmatter(gated=false){
+  let out=`---\nokf_version: "${OKF_VERSION}"\nstickshift_index_schema: "${GENERATED_INDEX_SCHEMA}"\n`;
+  if(gated) out+="discovery: gated\ndiscovery_scope: folder\n";
+  return out+="---\n\n";
+}
+async function readConceptEntries(dirPath,names){
+  return Promise.all(names.map(async name=>{
+    const path=dirPath?dirPath+"/"+name:name;
+    return [name,await readFile(path)];
+  }));
+}
+function renderGeneratedIndex(dirPath,conceptEntries,childNames){
+  const gated=!!dirPath&&isFolderGated(conceptEntries);
+  let out=generatedIndexFrontmatter(gated);
+  for(const [name,content] of conceptEntries) out+=entryLine(name,content)+"\n";
+  if(conceptEntries.length) out+="\n";
+  if(childNames.length){
+    out+="# Subdirectories\n";
+    for(const name of childNames) out+=`* [${name}](${name}/index.md)\n`;
+    out+="\n";
+  }
+  return {text:out,gated};
+}
+
 async function scanIndexTree(dir,prefix="",name=""){
   const concepts=[];
   const children=[];
@@ -137,18 +173,9 @@ async function generateIndexes(){
       return;
     }
 
-    let out=node.dir===""?`---\nokf_version: "${OKF_VERSION}"\n---\n\n`:"";
-    for(const conceptName of node.concepts){
-      const path=node.dir?node.dir+"/"+conceptName:conceptName;
-      out+=entryLine(conceptName,await readFile(path))+"\n";
-    }
-    if(node.concepts.length) out+="\n";
-    if(node.qualifyingChildren.length){
-      out+="# Subdirectories\n";
-      for(const child of node.qualifyingChildren) out+=`* [${child.name}](${child.name}/index.md)\n`;
-      out+="\n";
-    }
-    await writeFile(indexPath,out);
+    const conceptEntries=await readConceptEntries(node.dir,node.concepts);
+    const rendered=renderGeneratedIndex(node.dir,conceptEntries,node.qualifyingChildren.map(child=>child.name));
+    await writeFile(indexPath,rendered.text);
     count++;
   }
 
@@ -161,48 +188,31 @@ function indexEntryTarget(line){
   return m?m[1]:"";
 }
 
-async function patchIndexForWrites(dirPath,writes){
-  const indexPath=dirPath?dirPath+"/index.md":"index.md";
-  if(!await fileExists(indexPath)) return false;
-
-  const current=await readFile(indexPath);
-  const lines=String(current||"").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
-  const subAt=lines.findIndex(line=>line.trim()==="# Subdirectories");
-  const conceptEnd=subAt>=0?subAt:lines.length;
-  const entries=new Map();
-
-  for(let i=0;i<conceptEnd;i++){
-    const target=indexEntryTarget(lines[i]);
-    if(target && target.toLowerCase().endsWith(".md") && target.toLowerCase()!=="index.md") entries.set(target,lines[i]);
+async function rebuildDirectoryIndex(dirPath){
+  const dir=await getDirHandle(dirPath,false);
+  const concepts=[];
+  const childCandidates=[];
+  for await(const [name,h] of dir.entries()){
+    if(name.startsWith(".")||isSystemDir(name)) continue;
+    if(h.kind==="directory") childCandidates.push(name);
+    else if(isConcept(name)) concepts.push(name);
   }
-
-  for(const write of writes){
-    const name=write.rel.split("/").pop();
-    entries.set(name,entryLine(name,write.content));
-  }
-
-  const conceptLines=[...entries.entries()]
-    .sort(([a],[b])=>a.localeCompare(b))
-    .map(([,line])=>line);
-
-  let out=dirPath===""?`---
-okf_version: "${OKF_VERSION}"
----
-
-`:"";
-  if(conceptLines.length) out+=conceptLines.join("\n")+"\n\n";
-  if(subAt>=0){
-    const subSection=lines.slice(subAt).join("\n").trimEnd();
-    if(subSection) out+=subSection+"\n";
-  }
-
-  await writeFile(indexPath,out);
+  concepts.sort();
+  childCandidates.sort();
+  const childChecks=await Promise.all(childCandidates.map(async name=>[
+    name,
+    await fileExists((dirPath?dirPath+"/":"")+name+"/index.md")
+  ]));
+  const childNames=childChecks.filter(([,exists])=>exists).map(([name])=>name);
+  const conceptEntries=await readConceptEntries(dirPath,concepts);
+  const rendered=renderGeneratedIndex(dirPath,conceptEntries,childNames);
+  await writeFile(dirPath?dirPath+"/index.md":"index.md",rendered.text);
   return true;
 }
 
 async function updateIndexesForWrites(writes){
   if(!requireRoot()) return {count:0,mode:"none"};
-  const grouped=new Map();
+  const dirs=new Set();
 
   for(const write of writes||[]){
     const rel=String(write.rel||"").replace(/\\/g,"/").replace(/^\/+/,"");
@@ -210,25 +220,21 @@ async function updateIndexesForWrites(writes){
     const name=parts.pop();
     if(!name||!isConcept(name)) continue;
     if(parts.some(part=>part.startsWith(".")||isSystemDir(part))) continue;
-    const dirPath=parts.join("/");
-    if(!grouped.has(dirPath)) grouped.set(dirPath,[]);
-    grouped.get(dirPath).push({...write,rel});
+    dirs.add(parts.join("/"));
   }
 
-  if(!grouped.size) return {count:0,mode:"none"};
+  if(!dirs.size) return {count:0,mode:"none"};
 
-  const indexPaths=[...grouped.keys()].map(dirPath=>dirPath?dirPath+"/index.md":"index.md");
+  const indexPaths=[...dirs].map(dirPath=>dirPath?dirPath+"/index.md":"index.md");
   const available=await Promise.all(indexPaths.map(fileExists));
-  if(available.some(ok=>!ok)){
-    return {count:await generateIndexes(),mode:"full"};
-  }
+  if(available.some(ok=>!ok)) return {count:await generateIndexes(),mode:"full"};
 
-  const patched=await Promise.all([...grouped.entries()].map(([dirPath,items])=>patchIndexForWrites(dirPath,items)));
-  return {count:patched.filter(Boolean).length,mode:"patch"};
+  const rebuilt=await Promise.all([...dirs].map(rebuildDirectoryIndex));
+  return {count:rebuilt.filter(Boolean).length,mode:"patch"};
 }
 
-function bundleAnchor(path,content,layer){
-  return `<!-- OKF:BEGIN concept=${path} layer=${layer} -->\n${content}${content.endsWith("\n")?"":"\n"}<!-- OKF:END concept=${path} -->\n\n`;
+function bundleAnchor(path,content,selected){
+  return `<!-- OKF:BEGIN concept=${path} layer=${selected} -->\n${content}${content.endsWith("\n")?"":"\n"}<!-- OKF:END concept=${path} -->\n\n`;
 }
 function bundleHeader(mode,f,m,s){
   return `<!-- OKF-CONTEXT-BUNDLE\nmode: ${mode}\nokf_version: ${OKF_VERSION}\nassembled: ${new Date().toISOString()}\nconcepts: ${f+m+s} (${f} foundation, ${m} map, ${s} selected)\n-->\n\n`;
@@ -247,7 +253,7 @@ function contextDir(path){
   return parts.join("/");
 }
 function displayFolderName(path){
-  const slug=String(path||"").split("/").filter(Boolean).pop()||"Sensitive Context";
+  const slug=String(path||"").split("/").filter(Boolean).pop()||"Secsitive Context";
   return slug.split(/[-_]+/).filter(Boolean).map(word=>word.charAt(0).toUpperCase()+word.slice(1)).join(" ");
 }
 function collectGatedDiscoveryRoots(files){
@@ -279,8 +285,61 @@ function gatedMapAnchor(indexPath,gatedRoot){
 function embeddedOperatorSkill(){
   return document.getElementById("stickshift-skill")?.textContent?.trim()||"";
 }
-async function buildIndexBundle(){
-  if(!requireRoot()) return null;
+function resolveIndexTarget(indexPath,target){
+  const clean=String(target||"").replace(/\\/g,"/");
+  if(!clean||clean.startsWith("/")) return "";
+  const parts=(contextDir(indexPath)?contextDir(indexPath)+"/":"")+clean;
+  const resolved=[];
+  for(const part of parts.split("/")){
+    if(!part||part===".") continue;
+    if(part===".."){if(!resolved.length) return "";resolved.pop();continue;}
+    if(part.startsWith(".")) return "";
+    resolved.push(part);
+  }
+  if(resolved.at(-1)?.toLowerCase()!=="index.md") return "";
+  if(isSystemDir(resolved[0])) return "";
+  return resolved.join("/");
+}
+function indexSubdirectoryPaths(indexPath,content){
+  const lines=String(content||"").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+  const subAt=lines.findIndex(line=>line.trim()==="# Subdirectories");
+  if(subAt<0) return [];
+  const out=[];
+  for(const line of lines.slice(subAt+1)){
+    const target=indexEntryTarget(line);
+    if(!target||!target.toLowerCase().endsWith("/index.md")) continue;
+    const resolved=resolveIndexTarget(indexPath,target);
+    if(resolved) out.push(resolved);
+  }
+  return [...new Set(out)];
+}
+async function readGeneratedIndexGraph(){
+  const started=performance.now();
+  const queue=["index.md"];
+  const seen=new Set();
+  const records=[];
+  while(queue.length){
+    const path=queue.shift();
+    if(seen.has(path)) continue;
+    seen.add(path);
+    let content;
+    try{content=await readFile(path);}catch(e){
+      return {ok:false,reason:`generated map missing ${path}`,mapReadMs:performance.now()-started,indexFiles:records.length};
+    }
+    const fm=parseFrontmatter(content);
+    if(String(fm.stickshift_index_schema||"")!==GENERATED_INDEX_SCHEMA){
+      return {ok:false,reason:`legacy generated map at ${path}`,mapReadMs:performance.now()-started,indexFiles:records.length+1};
+    }
+    const gated=path!=="index.md" &&
+      String(fm.discovery||"").toLowerCase()==="gated" &&
+      String(fm.discovery_scope||"").toLowerCase()==="folder";
+    records.push({path,content,gated});
+    if(!gated) queue.push(...indexSubdirectoryPaths(path,content));
+  }
+  return {ok:true,records,mapReadMs:performance.now()-started,indexFiles:records.length};
+}
+async function buildIndexBundleLegacy(fallbackReason=""){
+  const started=performance.now();
   const files=await walkMarkdown({includeSystem:false});
   const indexes=[...files.keys()]
     .filter(path=>path.split("/").pop().toLowerCase()==="index.md")
@@ -303,7 +362,34 @@ async function buildIndexBundle(){
   }
 
   const text=bundleHeader("index",0,mapCount,0)+body;
-  return {text,f:0,m:mapCount,s:0,chars:text.length,gated:gatedCount};
+  return {
+    text,f:0,m:mapCount,s:0,chars:text.length,gated:gatedCount,
+    indexReadMode:"legacy-scan",indexFiles:indexes.length,
+    mapReadMs:performance.now()-started,fallbackReason
+  };
+}
+async function buildIndexBundle(){
+  if(!requireRoot()) return null;
+  const graph=await readGeneratedIndexGraph();
+  if(!graph.ok) return buildIndexBundleLegacy(graph.reason);
+
+  let body="",mapCount=0,gatedCount=0;
+  for(const record of graph.records){
+    if(record.gated){
+      const gatedRoot=contextDir(record.path);
+      body+=gatedMapAnchor(record.path,gatedRoot);
+      gatedCount++;
+    }else{
+      body+=bundleAnchor(record.path,record.content,"map");
+    }
+    mapCount++;
+  }
+  const text=bundleHeader("index",0,mapCount,0)+body;
+  return {
+    text,f:0,m:mapCount,s:0,chars:text.length,gated:gatedCount,
+    indexReadMode:"generated-map",indexFiles:graph.indexFiles,mapReadMs:graph.mapReadMs,
+    fallbackReason:""
+  };
 }
 async function buildSessionBootstrap(){
   const indexBundle=await buildIndexBundle();

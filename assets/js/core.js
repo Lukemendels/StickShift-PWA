@@ -191,8 +191,7 @@ async function switchContext(){
     }
     setEngaged(handle);
     try{ await idbSet(handle); }catch(e){ log("Context handle could not be persisted: "+e.message,"amb"); }
-    await refreshFiles();
-    log(`Context engaged: ${handle.name}`,"ok");
+    log(`Context engaged: ${handle.name}. Explorer remains unloaded until opened.`,"ok");
     return true;
   }catch(e){
     if(e?.name!=="AbortError") log("Select context failed: "+(e?.message||e),"er");
@@ -216,8 +215,7 @@ async function reconnectSavedContext(request=false){
       return false;
     }
     setEngaged(handle);
-    await refreshFiles();
-    log(`Reconnected context: ${handle.name}`,"ok");
+    log(`Reconnected context: ${handle.name}. Explorer remains unloaded until opened.`,"ok");
     return true;
   }catch(e){
     log("Saved context could not be restored: "+(e?.message||e),"amb");

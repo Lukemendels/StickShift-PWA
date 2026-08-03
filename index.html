@@ -50,7 +50,7 @@
 <section class="card">
 <h2>◄ Pull — Session bootstrap</h2>
 <div class="body">
-<p class="hint">The header action builds one paste containing the StickShift Operator skill and a map-only workspace index. Gated folders expose only a discovery stub. The same payload is always saved to <code>-dist/StickShift-context.md</code>.</p>
+<p class="hint">The header action reads the deterministic generated map, copies the Operator skill plus map-only index immediately, and settles the same full payload to <code>-dist/StickShift-context.md</code> in the background.</p>
 <p class="hint compact-hint">Above 20k on Android, long-press the destination text field and choose <strong>Paste</strong>. Gboard clipboard history may truncate. Use <code>-dist</code> for structured Markdown or maximum reliability.</p>
 <div class="row">
 <button disabled="" id="btnCopy">Copy again</button>
@@ -161,6 +161,7 @@ Treat the index as a discovery map, not the default payload for every read.
 
 - A session bootstrap already contains the operator skill and a current map. Do not immediately request the index again.
 - Use `mode: index` when the map may be stale, when workspace structure may have changed materially, or when a path cannot be resolved from the current map. An index refresh returns maps only; it does not repeat this skill or automatically load foundation bodies.
+- Generated indexes are deterministic derived discovery state. If the user changed, renamed, added, or removed workspace files outside StickShift, ask them to run **Regenerate indexes** before relying on a refreshed map.
 - Once the needed paths are known, use `mode: bundle` with `include:` to retrieve only the concepts needed for the task.
 - Foundation concepts are authoritative but are retrieved on demand in the consumer PWA. Load the relevant foundation files when their exact doctrine, constraints, or operating details materially affect the work.
 - Prefer targeted retrieval over repeatedly requesting the full index.
@@ -239,10 +240,12 @@ A single envelope may contain multiple FILE blocks. Preserve valid OKF frontmatt
 
 StickShift may also recognize HTML_OPEN packets for installed tools. When emitting an `HTML_OPEN` packet, wrap the complete packet in a `text` fenced code block under the same packet formatting contract. The mobile PWA currently recognizes this packet type but does not automatically launch a tool, so do not depend on automatic tool launch in the mobile workflow.
 </script>
-<script src="./assets/js/core.js?v=9"></script>
-<script src="./assets/js/fs.js?v=9"></script>
-<script src="./assets/js/packets.js?v=9"></script>
-<script src="./assets/js/ui.js?v=9"></script>
+<script src="./assets/js/core.js?v=10"></script>
+<script src="./assets/js/fs.js?v=10"></script>
+<script src="./assets/js/packets-delivery.js?v=10"></script>
+<script src="./assets/js/packets-routing.js?v=10"></script>
+<script src="./assets/js/explorer.js?v=10"></script>
+<script src="./assets/js/ui.js?v=10"></script>
 <script>
 if ("serviceWorker" in navigator) {
   let reloadingForWorkerUpdate = false;

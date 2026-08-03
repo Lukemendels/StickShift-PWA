@@ -41,8 +41,9 @@ $("btnIndex").addEventListener("click",async()=>{
   if(!requireRoot()) return;
   try{
     const n=await generateIndexes();
-    log(`Indexes regenerated: ${n} qualifying map file(s). Empty directory links removed.`,"ok");
-    await refreshFiles();
+    log(`Indexes regenerated: ${n} qualifying map file(s). Empty directory links removed; generated-map fast path ready.`,"ok");
+    FILES.clear();
+    if(!$("viewExplorer").hidden) await refreshFiles();
   }catch(e){log("Index generation failed: "+(e?.message||e),"er");}
 });
 document.querySelector(".tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-view]");if(b)showView(b.dataset.view);});
