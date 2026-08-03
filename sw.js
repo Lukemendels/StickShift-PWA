@@ -1,4 +1,4 @@
-const CACHE_NAME = "stickshift-pwa-v11";
+const CACHE_NAME = "stickshift-pwa-v12";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -16,7 +16,17 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(async cache => {
+        for(const url of APP_SHELL){
+          const response=await fetch(url,{cache:"reload"});
+          if(!response.ok) throw new Error(`App shell fetch failed: ${url}`);
+          await cache.put(url,response);
+        }
+      })
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", event => {
