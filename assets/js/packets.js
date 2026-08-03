@@ -1,4 +1,4 @@
-const CLIPBOARD_SAFE_CHARS = 18000;
+const CLIPBOARD_PORTABLE_CHARS = 20000;
 
 function parseWriteEnvelope(text){
   const m=String(text||"").match(/<VBA_WRITE>([\s\S]*?)<\/VBA_WRITE>/i);
@@ -90,38 +90,34 @@ function fmtMs(ms){return `${Math.max(0,Math.round(ms))} ms`;}
 
 async function deliverContextBundle(r){
   const path=`${DIST_DIR}/StickShift-context.md`;
-  const safe=r.chars<=CLIPBOARD_SAFE_CHARS;
+  const portable=r.chars<=CLIPBOARD_PORTABLE_CHARS;
   $("bundleOut").value=r.text;
-  $("btnCopy").disabled=!safe;
+  $("btnCopy").disabled=!r.text;
 
-  let copied=false,copyMs=0,distMs=0;
-  if(safe){
-    const copyStart=performance.now();
-    copied=await writeClip(r.text);
-    copyMs=performance.now()-copyStart;
+  const copyStart=performance.now();
+  const copied=await writeClip(r.text);
+  const copyMs=performance.now()-copyStart;
 
-    if(copied){
-      $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · copied · saving -dist backup…`;
-      setPasteState("success","Context copied",`Copied to clipboard. Saving a backup to ${path}.`);
-    }else{
-      $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · clipboard unavailable · saving to -dist…`;
-      setPasteState("","Clipboard copy unavailable",`Saving to ${path}; you can use that file or tap Copy again.`);
-    }
+  const distStart=performance.now();
+  await writeFile(path,r.text);
+  const distMs=performance.now()-distStart;
 
-    const distStart=performance.now();
-    await writeFile(path,r.text);
-    distMs=performance.now()-distStart;
-    $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · ${copied?"clipboard copied · ":""}backup saved to ${path}`;
-    if(!copied) setPasteState("success","Context saved to -dist",`Clipboard copy was unavailable. Use ${path} as the context packet, or tap Copy again.`);
+  const count=r.f+r.m+r.s;
+  const size=`${r.chars.toLocaleString()} chars`;
+  const mapped=r.bootstrap?`${count} maps + operator skill`:`${count} concepts`;
+  const clipboardState=copied?"clipboard copied":"clipboard unavailable";
+  const portability=portable?"plain-text portable":"over 20k; app handling may vary";
+  $("bundleMeter").textContent=`${mapped} · ${size} · ${clipboardState} · ${portability} · saved to ${path}`;
+
+  if(copied&&portable){
+    setPasteState("success",r.bootstrap?"Session bootstrap copied":"Context copied",`Copied as plain text and saved to ${path}.`);
+  }else if(copied){
+    setPasteState("success",r.bootstrap?"Large session bootstrap copied":"Large context copied",`Paste handling may vary above 20,000 characters; some apps convert large pastes to attachments. Reliable fallback saved to ${path}.`);
   }else{
-    const distStart=performance.now();
-    await writeFile(path,r.text);
-    distMs=performance.now()-distStart;
-    $("bundleMeter").textContent=`${r.f+r.m+r.s} concepts · ${r.chars.toLocaleString()} chars · overflow · ${path}`;
-    setPasteState("success","Context exceeds clipboard-safe size",`Saved to ${path}. Use that file as the context packet.`);
+    setPasteState("success","Context saved to -dist",`Clipboard copy was unavailable. Use ${path} as the reliable fallback, or tap Copy again.`);
   }
 
-  return {safe,copied,overflow:!safe,copyMs,distMs};
+  return {portable,copied,large:!portable,copyMs,distMs};
 }
 
 async function readClipboardAndRoute(){
@@ -201,10 +197,10 @@ async function routePacket(text,timing={}){
       const delivery=await deliverContextBundle(r);
       const totalMs=timing.startedAt?performance.now()-timing.startedAt:buildMs+delivery.copyMs+delivery.distMs;
       const readPart=Number.isFinite(timing.clipboardReadMs)?`read ${fmtMs(timing.clipboardReadMs)} · `:"";
-      const copyPart=delivery.safe?`clip ${fmtMs(delivery.copyMs)} · `:"clip skipped · ";
+      const copyPart=delivery.copied?`clip ${fmtMs(delivery.copyMs)} · `:"clip unavailable · ";
       log(`Context timing: ${readPart}build ${fmtMs(buildMs)} · ${copyPart}-dist ${fmtMs(delivery.distMs)} · total ${fmtMs(totalMs)}.`,"info");
-      log(`CONTEXT_REQUEST built: ${r.f+r.m+r.s} concepts.`,"ok");
-      if(!delivery.overflow) resetPasteSoon();
+      log(`CONTEXT_REQUEST built: ${r.f+r.m+r.s} concepts${r.gated?` · ${r.gated} gated map${r.gated===1?"":"s"}`:""}.`,"ok");
+      resetPasteSoon();
     }catch(e){
       setPasteState("error","Build failed",e?.message||String(e));log("Build failed: "+(e?.message||e),"er");resetPasteSoon();
     }
@@ -224,12 +220,13 @@ async function doBuild(){
   if(!requireRoot()) return;
   try{
     const buildStart=performance.now();
-    const r=await buildIndexBundle();
+    const r=await buildSessionBootstrap();
     const buildMs=performance.now()-buildStart;
     const delivery=await deliverContextBundle(r);
-    log(`Index timing: build ${fmtMs(buildMs)} · ${delivery.safe?`clip ${fmtMs(delivery.copyMs)}`:"clip skipped"} · -dist ${fmtMs(delivery.distMs)}.`,"info");
-    log(`Index bundle built${delivery.copied?" and copied":delivery.overflow?" to -dist overflow":""}.`,"ok");
-  }catch(e){log("Bundle build failed: "+(e?.message||e),"er");}
+    const copyPart=delivery.copied?`clip ${fmtMs(delivery.copyMs)}`:"clip unavailable";
+    log(`Bootstrap timing: build ${fmtMs(buildMs)} · ${copyPart} · -dist ${fmtMs(delivery.distMs)}.`,"info");
+    log(`Session bootstrap built: ${r.m} maps${r.gated?` · ${r.gated} gated`:""} · operator skill included.`,"ok");
+  }catch(e){log("Bootstrap build failed: "+(e?.message||e),"er");}
 }
 
 async function refreshFiles(){
