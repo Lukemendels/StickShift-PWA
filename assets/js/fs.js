@@ -212,19 +212,78 @@ function normalizeContextPath(path){
   if(isSystemDir(parts[0])) return "";
   return clean;
 }
+function contextDir(path){
+  const parts=String(path||"").replace(/\\/g,"/").split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+function displayFolderName(path){
+  const slug=String(path||"").split("/").filter(Boolean).pop()||"Sensitive Context";
+  return slug.split(/[-_]+/).filter(Boolean).map(word=>word.charAt(0).toUpperCase()+word.slice(1)).join(" ");
+}
+function collectGatedDiscoveryRoots(files){
+  const candidates=[];
+  for(const [path,content] of files){
+    const leaf=path.split("/").pop();
+    if(!isConcept(leaf)) continue;
+    const fm=parseFrontmatter(content);
+    if(String(fm.discovery||"").toLowerCase()!=="gated") continue;
+    if(String(fm.discovery_scope||"").toLowerCase()!=="folder") continue;
+    const dir=contextDir(path);
+    if(dir) candidates.push(dir);
+  }
+  const ordered=[...new Set(candidates)].sort((a,b)=>{
+    const depth=a.split("/").length-b.split("/").length;
+    return depth||a.localeCompare(b);
+  });
+  return ordered.filter(path=>!ordered.some(other=>other!==path&&path.startsWith(other+"/")));
+}
+function gatedRootForIndex(indexPath,gatedRoots){
+  if(indexPath==="index.md") return "";
+  const dir=contextDir(indexPath);
+  return gatedRoots.find(root=>dir===root||dir.startsWith(root+"/"))||"";
+}
+function gatedMapAnchor(indexPath,gatedRoot){
+  const title=displayFolderName(gatedRoot);
+  return `<!-- OKF:BEGIN concept=${indexPath} layer=map discovery=gated -->\n# ${title}\n\n> Gated discovery: this folder exists, but its generated map is withheld from automatic workspace orientation.\n\nRequest \`${gatedRoot}/index.md\` explicitly when the user's request is in this domain or when this personal context could materially change the safety, applicability, or quality of the answer.\n<!-- OKF:END concept=${indexPath} -->\n\n`;
+}
+function embeddedOperatorSkill(){
+  return document.getElementById("stickshift-skill")?.textContent?.trim()||"";
+}
 async function buildIndexBundle(){
   if(!requireRoot()) return null;
-  const paths=await walkMarkdownPaths({includeSystem:false});
-  const foundation=paths.filter(p=>p.startsWith(FOUNDATION_DIR+"/")&&!RESERVED.has(p.split("/").pop().toLowerCase())).sort();
-  const indexes=paths.filter(p=>p.split("/").pop().toLowerCase()==="index.md").sort((a,b)=>a==="index.md"?-1:b==="index.md"?1:a.localeCompare(b));
-  const wanted=[...foundation,...indexes];
-  const entries=await Promise.all(wanted.map(async p=>[p,await readFile(p)]));
-  const contents=new Map(entries);
-  let body="";
-  for(const p of foundation) body+=bundleAnchor(p,contents.get(p),"foundation");
-  for(const p of indexes) body+=bundleAnchor(p,contents.get(p),"map");
-  const text=bundleHeader("index",foundation.length,indexes.length,0)+body;
-  return {text,f:foundation.length,m:indexes.length,s:0,chars:text.length};
+  const files=await walkMarkdown({includeSystem:false});
+  const indexes=[...files.keys()]
+    .filter(path=>path.split("/").pop().toLowerCase()==="index.md")
+    .sort((a,b)=>a==="index.md"?-1:b==="index.md"?1:a.localeCompare(b));
+  const gatedRoots=collectGatedDiscoveryRoots(files);
+  let body="",mapCount=0,gatedCount=0;
+
+  for(const path of indexes){
+    const gatedRoot=gatedRootForIndex(path,gatedRoots);
+    if(gatedRoot){
+      if(path===gatedRoot+"/index.md"){
+        body+=gatedMapAnchor(path,gatedRoot);
+        mapCount++;
+        gatedCount++;
+      }
+      continue;
+    }
+    body+=bundleAnchor(path,files.get(path),"map");
+    mapCount++;
+  }
+
+  const text=bundleHeader("index",0,mapCount,0)+body;
+  return {text,f:0,m:mapCount,s:0,chars:text.length,gated:gatedCount};
+}
+async function buildSessionBootstrap(){
+  const indexBundle=await buildIndexBundle();
+  if(!indexBundle) return null;
+  const skill=embeddedOperatorSkill();
+  if(!skill) throw new Error("Embedded StickShift Operator skill is unavailable.");
+  const prefix=`<!-- STICKSHIFT-SESSION-BOOTSTRAP\ncontains: operator-skill + map-only-index\n-->\n\n<!-- STICKSHIFT:BEGIN operator-skill -->\n${skill}\n<!-- STICKSHIFT:END operator-skill -->\n\n`;
+  const text=prefix+indexBundle.text;
+  return {...indexBundle,text,chars:text.length,bootstrap:true};
 }
 async function buildBundleFromRequest(req){
   if(req.mode==="index") return buildIndexBundle();
