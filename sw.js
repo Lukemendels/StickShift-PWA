@@ -1,15 +1,16 @@
-const CACHE_NAME = "stickshift-pwa-v10";
+const CACHE_NAME = "stickshift-pwa-v11";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./assets/app.css?v=9",
-  "./assets/js/core.js?v=10",
-  "./assets/js/fs.js?v=10",
-  "./assets/js/packets-delivery.js?v=10",
-  "./assets/js/packets-routing.js?v=10",
-  "./assets/js/explorer.js?v=10",
-  "./assets/js/ui.js?v=10",
+  "./assets/js/core.js?v=11",
+  "./assets/js/fs.js?v=11",
+  "./assets/js/generated-map-parallel.js?v=11",
+  "./assets/js/packets-delivery.js?v=11",
+  "./assets/js/packets-routing.js?v=11",
+  "./assets/js/explorer.js?v=11",
+  "./assets/js/ui.js?v=11",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];
