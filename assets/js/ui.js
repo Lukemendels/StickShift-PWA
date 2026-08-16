@@ -44,16 +44,33 @@ $("btnIndex").addEventListener("click",async()=>{
   const started=performance.now();
   button.disabled=true;
   button.textContent="Regenerating…";
-  $("writeMeter").textContent="Regenerating generated maps + aggregate cache…";
+  $("writeMeter").textContent="Scanning workspace…";
   log("Manual index regeneration started.","info");
+
+  if(typeof setIndexProgressHandler==="function"){
+    setIndexProgressHandler(progress=>{
+      if(progress.stage==="scan"){
+        $("writeMeter").textContent=`Scanning… ${progress.directories} folder${progress.directories===1?"":"s"} · ${progress.concepts} concept${progress.concepts===1?"":"s"}`;
+      }else if(progress.stage==="write"){
+        $("writeMeter").textContent=`Writing maps… ${progress.processed}/${progress.total} folders · ${progress.updated} updated · ${progress.unchanged} unchanged`;
+      }else if(progress.stage==="aggregate"){
+        $("writeMeter").textContent="Maps current · rebuilding aggregate cache…";
+      }
+    });
+  }
+
   try{
     const n=await generateIndexes();
     const elapsed=performance.now()-started;
-    const status=`Indexes current · ${n} map file${n===1?"":"s"} · ${fmtMs(elapsed)} · ${stampNow()}`;
+    const stats=typeof LAST_INDEX_REGEN_STATS!=="undefined"?LAST_INDEX_REGEN_STATS:null;
+    const detail=stats
+      ?`${stats.updated} updated · ${stats.unchanged} unchanged${stats.removed?` · ${stats.removed} removed`:""}`
+      :"generation complete";
+    const status=`Indexes current · ${n} map file${n===1?"":"s"} · ${detail} · ${fmtMs(elapsed)} · ${stampNow()}`;
     $("writeMeter").textContent=status;
-    log(`Indexes regenerated: ${n} qualifying map file(s) · ${fmtMs(elapsed)} total. Empty directory links removed; aggregate map cache rebuilt.`,"ok");
-    FILES.clear();
-    if(!$("viewExplorer").hidden) await refreshFiles();
+    log(`Indexes regenerated: ${n} qualifying map file(s) · ${detail} · ${fmtMs(elapsed)} total.`,"ok");
+    invalidateGeneratedExplorerFiles();
+    if(!$("viewExplorer").hidden) await refreshFiles({reloadLoaded:true});
     button.textContent="Indexes current";
     setTimeout(()=>{button.textContent=idleLabel;button.disabled=!ROOT;},1400);
   }catch(e){
@@ -62,26 +79,28 @@ $("btnIndex").addEventListener("click",async()=>{
     log("Index generation failed: "+(e?.message||e),"er");
     button.textContent=idleLabel;
     button.disabled=!ROOT;
+  }finally{
+    if(typeof setIndexProgressHandler==="function") setIndexProgressHandler(null);
   }
 });
 document.querySelector(".tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-view]");if(b)showView(b.dataset.view);});
-$("fileList").addEventListener("click",e=>{
+$("fileList").addEventListener("click",async e=>{
   const folder=e.target.closest("[data-folder]");
-  if(folder){toggleExplorerFolder(folder.dataset.folder);return;}
+  if(folder){await toggleExplorerFolder(folder.dataset.folder);return;}
   const row=e.target.closest("[data-path]");
   if(!row) return;
-  ACTIVE_PATH=row.dataset.path;EDIT_MODE=false;expandActiveAncestors();renderFileList();renderActiveFile();
+  await selectExplorerFile(row.dataset.path);
 });
-$("fileList").addEventListener("keydown",e=>{
+$("fileList").addEventListener("keydown",async e=>{
   if(e.key!=="Enter"&&e.key!==" ") return;
   const folder=e.target.closest("[data-folder]");
   const row=e.target.closest("[data-path]");
   if(!folder&&!row) return;
   e.preventDefault();
-  if(folder){toggleExplorerFolder(folder.dataset.folder);return;}
-  ACTIVE_PATH=row.dataset.path;EDIT_MODE=false;expandActiveAncestors();renderFileList();renderActiveFile();
+  if(folder){await toggleExplorerFolder(folder.dataset.folder);return;}
+  await selectExplorerFile(row.dataset.path);
 });
-$("btnRefreshFiles").addEventListener("click",refreshFiles);
+$("btnRefreshFiles").addEventListener("click",()=>refreshFiles({reloadLoaded:true}));
 $("btnEdit").addEventListener("click",()=>{
   if(!ACTIVE_PATH) return;
   EDIT_MODE=!EDIT_MODE;renderActiveFile();
