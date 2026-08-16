@@ -1,3 +1,5 @@
+let EXPLORER_EXPANDED_ROOT=null;
+
 async function refreshFiles(){
   if(!ROOT){
     FILES.clear();renderFileList();return;
@@ -11,9 +13,14 @@ async function refreshFiles(){
   }catch(e){log("File refresh failed: "+(e?.message||e),"er");}
 }
 function explorerVisiblePaths(){
-  return [...FILES.keys()]
-    .filter(path=>path.split("/").pop().toLowerCase()!=="index.md")
-    .sort((a,b)=>a.localeCompare(b));
+  return [...FILES.keys()].sort((a,b)=>a.localeCompare(b));
+}
+function isGeneratedIndexPath(path){
+  return String(path||"").split("/").pop().toLowerCase()==="index.md";
+}
+function explorerReadOnlyPath(path){
+  const clean=String(path||"");
+  return isGeneratedIndexPath(clean)||clean===DIST_DIR||clean.startsWith(DIST_DIR+"/");
 }
 function buildExplorerTree(paths){
   const root={folders:new Map(),files:[]};
@@ -31,6 +38,15 @@ function buildExplorerTree(paths){
   }
   return root;
 }
+function expandExplorerTree(tree){
+  function rec(node){
+    for(const folder of node.folders.values()){
+      EXPANDED_DIRS.add(folder.path);
+      rec(folder);
+    }
+  }
+  rec(tree);
+}
 function expandActiveAncestors(){
   if(!ACTIVE_PATH) return;
   const parts=ACTIVE_PATH.split("/").filter(Boolean);
@@ -45,10 +61,16 @@ function renderFileList(){
   const el=$("fileList");
   if(!ROOT){el.innerHTML='<div class="file-row empty-row">Engage a context to browse files.</div>';return;}
   const paths=explorerVisiblePaths();
-  if(!paths.length){el.innerHTML='<div class="file-row empty-row">No user-facing Markdown files found.</div>';return;}
+  if(!paths.length){el.innerHTML='<div class="file-row empty-row">No Markdown files found.</div>';return;}
 
   expandActiveAncestors();
   const tree=buildExplorerTree(paths);
+  if(EXPLORER_EXPANDED_ROOT!==ROOT){
+    EXPANDED_DIRS.clear();
+    expandExplorerTree(tree);
+    expandActiveAncestors();
+    EXPLORER_EXPANDED_ROOT=ROOT;
+  }
   const rows=[];
   function renderNode(node,depth){
     for(const [name,folder] of [...node.folders.entries()].sort(([a],[b])=>a.localeCompare(b))){
@@ -58,8 +80,10 @@ function renderFileList(){
       if(expanded) renderNode(folder,depth+1);
     }
     for(const file of node.files.sort((a,b)=>a.name.localeCompare(b.name))){
-      const system=file.path.startsWith(DIST_DIR+"/");
-      rows.push(`<div class="file-row file-node${file.path===ACTIVE_PATH?" active":""}${system?" system":""}" data-path="${escapeHtml(file.path)}" role="button" tabindex="0" style="--depth:${depth}"><span class="tree-spacer" aria-hidden="true"></span><span class="tree-name">${escapeHtml(file.name)}</span></div>`);
+      const generated=isGeneratedIndexPath(file.path);
+      const system=generated||file.path.startsWith(DIST_DIR+"/");
+      const label=generated?`${file.name} · generated map`:file.name;
+      rows.push(`<div class="file-row file-node${file.path===ACTIVE_PATH?" active":""}${system?" system":""}" data-path="${escapeHtml(file.path)}" role="button" tabindex="0" style="--depth:${depth}"${generated?' title="Generated discovery map — read only"':""}><span class="tree-spacer" aria-hidden="true"></span><span class="tree-name">${escapeHtml(label)}</span></div>`);
     }
   }
   renderNode(tree,0);
@@ -72,7 +96,7 @@ function toggleExplorerFolder(path){
 }
 function renderActiveFile(){
   $("editorPath").textContent=ACTIVE_PATH||"No file selected";
-  $("btnEdit").disabled=!ACTIVE_PATH||ACTIVE_PATH.startsWith(DIST_DIR+"/");
+  $("btnEdit").disabled=!ACTIVE_PATH||explorerReadOnlyPath(ACTIVE_PATH);
   if(!ACTIVE_PATH||!FILES.has(ACTIVE_PATH)){
     $("editorBody").innerHTML='<div class="preview">Select a Markdown file.</div>';
     $("btnSaveFile").hidden=true;EDIT_MODE=false;return;

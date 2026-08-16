@@ -39,12 +39,30 @@ $("btnCopy").addEventListener("click",async()=>{
 });
 $("btnIndex").addEventListener("click",async()=>{
   if(!requireRoot()) return;
+  const button=$("btnIndex");
+  const idleLabel="Regenerate indexes";
+  const started=performance.now();
+  button.disabled=true;
+  button.textContent="Regenerating…";
+  $("writeMeter").textContent="Regenerating generated maps + aggregate cache…";
+  log("Manual index regeneration started.","info");
   try{
     const n=await generateIndexes();
-    log(`Indexes regenerated: ${n} qualifying map file(s). Empty directory links removed; generated-map fast path ready.`,"ok");
+    const elapsed=performance.now()-started;
+    const status=`Indexes current · ${n} map file${n===1?"":"s"} · ${fmtMs(elapsed)} · ${stampNow()}`;
+    $("writeMeter").textContent=status;
+    log(`Indexes regenerated: ${n} qualifying map file(s) · ${fmtMs(elapsed)} total. Empty directory links removed; aggregate map cache rebuilt.`,"ok");
     FILES.clear();
     if(!$("viewExplorer").hidden) await refreshFiles();
-  }catch(e){log("Index generation failed: "+(e?.message||e),"er");}
+    button.textContent="Indexes current";
+    setTimeout(()=>{button.textContent=idleLabel;button.disabled=!ROOT;},1400);
+  }catch(e){
+    const elapsed=performance.now()-started;
+    $("writeMeter").textContent=`Index regeneration failed · ${fmtMs(elapsed)} · ${e?.message||e}`;
+    log("Index generation failed: "+(e?.message||e),"er");
+    button.textContent=idleLabel;
+    button.disabled=!ROOT;
+  }
 });
 document.querySelector(".tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-view]");if(b)showView(b.dataset.view);});
 $("fileList").addEventListener("click",e=>{
