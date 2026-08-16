@@ -160,11 +160,181 @@ writeFile=async function(path,content){
   return baseWriteFile(path,content);
 };
 
+/* Full index regeneration is optimized separately from incremental writes:
+   - scan directory siblings concurrently by depth;
+   - read concept bodies concurrently per folder;
+   - skip index writes when generated contents are unchanged;
+   - expose progress without changing the deterministic index format. */
+let INDEX_PROGRESS_HANDLER=null;
+let LAST_INDEX_REGEN_STATS=null;
+
+function setIndexProgressHandler(handler){
+  INDEX_PROGRESS_HANDLER=typeof handler==="function"?handler:null;
+}
+function reportIndexProgress(stage,detail={}){
+  try{INDEX_PROGRESS_HANDLER?.({stage,...detail});}catch{}
+}
+async function mapWithLimit(items,limit,worker){
+  if(!items.length) return [];
+  const out=new Array(items.length);
+  let next=0;
+  async function run(){
+    while(true){
+      const i=next++;
+      if(i>=items.length) return;
+      out[i]=await worker(items[i],i);
+    }
+  }
+  const workers=Math.min(Math.max(1,limit),items.length);
+  await Promise.all(Array.from({length:workers},()=>run()));
+  return out;
+}
+async function scanIndexTreeParallel(){
+  const started=performance.now();
+  const root={dir:"",name:"",handle:ROOT,concepts:[],children:[],qualifyingChildren:[],qualifies:true};
+  let frontier=[root];
+  let directories=0,concepts=0,rounds=0;
+
+  while(frontier.length){
+    const batch=frontier;
+    frontier=[];
+    rounds++;
+
+    await mapWithLimit(batch,6,async node=>{
+      const foundConcepts=[];
+      const foundChildren=[];
+      for await(const [entryName,h] of node.handle.entries()){
+        if(entryName.startsWith(".")||isSystemDir(entryName)) continue;
+        if(h.kind==="directory"){
+          const childDir=node.dir?node.dir+"/"+entryName:entryName;
+          foundChildren.push({
+            dir:childDir,
+            name:entryName,
+            handle:h,
+            concepts:[],
+            children:[],
+            qualifyingChildren:[],
+            qualifies:false
+          });
+        }else if(isConcept(entryName)){
+          foundConcepts.push(entryName);
+        }
+      }
+      foundConcepts.sort();
+      foundChildren.sort((a,b)=>a.name.localeCompare(b.name));
+      node.concepts=foundConcepts;
+      node.children=foundChildren;
+      directories++;
+      concepts+=foundConcepts.length;
+      reportIndexProgress("scan",{directories,concepts,round:rounds});
+    });
+
+    for(const node of batch) frontier.push(...node.children);
+  }
+
+  function finalize(node){
+    for(const child of node.children) finalize(child);
+    node.qualifyingChildren=node.children.filter(child=>child.qualifies);
+    node.qualifies=node.dir===""||node.concepts.length>0||node.qualifyingChildren.length>0;
+  }
+  finalize(root);
+
+  return {root,directories,concepts,rounds,scanMs:performance.now()-started};
+}
+async function readNodeConceptEntries(node){
+  return Promise.all(node.concepts.map(async name=>{
+    const fh=await node.handle.getFileHandle(name,false);
+    return [name,await (await fh.getFile()).text()];
+  }));
+}
+async function readNodeIndex(node){
+  try{
+    const fh=await node.handle.getFileHandle("index.md",false);
+    return await (await fh.getFile()).text();
+  }catch(error){
+    if(error?.name==="NotFoundError") return null;
+    throw error;
+  }
+}
+async function writeNodeIndex(node,text){
+  const fh=await node.handle.getFileHandle("index.md",{create:true});
+  const writer=await fh.createWritable();
+  await writer.write(text);
+  await writer.close();
+}
+async function removeNodeIndex(node){
+  try{
+    await node.handle.removeEntry("index.md");
+    return true;
+  }catch(error){
+    if(error?.name==="NotFoundError") return false;
+    throw error;
+  }
+}
+async function generateIndexesOptimized(){
+  if(!requireRoot()) return 0;
+  const scan=await scanIndexTreeParallel();
+  const nodes=[];
+  (function collect(node){
+    nodes.push(node);
+    for(const child of node.children) collect(child);
+  })(scan.root);
+
+  const qualifying=nodes.filter(node=>node.qualifies);
+  const started=performance.now();
+  let processed=0,updated=0,unchanged=0,removed=0;
+
+  reportIndexProgress("write",{
+    processed,total:nodes.length,updated,unchanged,removed,
+    maps:qualifying.length
+  });
+
+  await mapWithLimit(nodes,4,async node=>{
+    if(!node.qualifies){
+      if(node.dir&&await removeNodeIndex(node)) removed++;
+    }else{
+      const entries=await readNodeConceptEntries(node);
+      const rendered=renderGeneratedIndex(
+        node.dir,
+        entries,
+        node.qualifyingChildren.map(child=>child.name)
+      );
+      const existing=await readNodeIndex(node);
+      if(existing===rendered.text){
+        unchanged++;
+      }else{
+        await writeNodeIndex(node,rendered.text);
+        updated++;
+      }
+    }
+    processed++;
+    reportIndexProgress("write",{
+      processed,total:nodes.length,updated,unchanged,removed,
+      maps:qualifying.length
+    });
+  });
+
+  LAST_INDEX_REGEN_STATS={
+    maps:qualifying.length,
+    directories:scan.directories,
+    concepts:scan.concepts,
+    scanRounds:scan.rounds,
+    scanMs:scan.scanMs,
+    writeMs:performance.now()-started,
+    updated,unchanged,removed
+  };
+  return qualifying.length;
+}
+
+generateIndexes=generateIndexesOptimized;
 const baseGenerateIndexes=generateIndexes;
 generateIndexes=async function(){
   if(!AGGREGATE_MAP_DIRTY) await invalidateAggregateMap();
   const count=await baseGenerateIndexes();
-  await rebuildAggregateMap();
+  reportIndexProgress("aggregate",{maps:count,stats:LAST_INDEX_REGEN_STATS});
+  const aggregate=await rebuildAggregateMap();
+  if(LAST_INDEX_REGEN_STATS) LAST_INDEX_REGEN_STATS.aggregateMs=aggregate.elapsed;
+  reportIndexProgress("complete",{maps:count,stats:LAST_INDEX_REGEN_STATS});
   return count;
 };
 
